@@ -353,15 +353,15 @@ func cmdBacktest(args []string) {
 		os.Exit(1)
 	}
 
-	// Final render with correct end result
+	// Final render with chart
 	if backtestUI != nil {
 		backtestUI.UpdateStats(
 			result.EndEquity,
 			result.TotalTrades,
 			result.WinRate.Mul(decimal.NewFromInt(100)),
-			"DONE",
+			"",
 		)
-		backtestUI.Render()
+		backtestUI.RenderFinal()
 	}
 
 	// Print results

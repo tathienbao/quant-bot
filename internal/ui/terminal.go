@@ -11,18 +11,17 @@ import (
 
 // ANSI escape codes
 const (
-	ClearLine    = "\033[2K"
-	MoveToStart  = "\r"
-	MoveUp       = "\033[%dA"
-	HideCursor   = "\033[?25l"
-	ShowCursor   = "\033[?25h"
-	ColorReset   = "\033[0m"
-	ColorGreen   = "\033[32m"
-	ColorRed     = "\033[31m"
-	ColorYellow  = "\033[33m"
-	ColorCyan    = "\033[36m"
-	ColorDim     = "\033[2m"
-	ColorBold    = "\033[1m"
+	ClearLine   = "\033[2K"
+	MoveToStart = "\r"
+	HideCursor  = "\033[?25l"
+	ShowCursor  = "\033[?25h"
+	ColorReset  = "\033[0m"
+	ColorGreen  = "\033[32m"
+	ColorRed    = "\033[31m"
+	ColorYellow = "\033[33m"
+	ColorCyan   = "\033[36m"
+	ColorDim    = "\033[2m"
+	ColorBold   = "\033[1m"
 )
 
 // Candle represents OHLC data for one bar
@@ -36,34 +35,30 @@ type Candle struct {
 
 // BacktestUI handles terminal display for backtesting
 type BacktestUI struct {
-	candles    []Candle
-	maxCandles int
+	candles     []Candle
+	maxCandles  int
 	chartHeight int
 
 	// Stats
-	currentBar   int
-	totalBars    int
-	equity       decimal.Decimal
-	startEquity  decimal.Decimal
-	trades       int
-	winRate      decimal.Decimal
-	lastSignal   string
+	currentBar  int
+	totalBars   int
+	equity      decimal.Decimal
+	startEquity decimal.Decimal
+	trades      int
+	winRate     decimal.Decimal
+	lastSignal  string
 
 	// Terminal
 	width  int
 	height int
-
-	// Track lines printed for cleanup
-	linesPrinted int
 }
 
 // NewBacktestUI creates a new backtest UI
 func NewBacktestUI(totalBars int, startEquity decimal.Decimal) *BacktestUI {
-	width, height := getTerminalSize()
+	width, _ := getTerminalSize()
 
-	// Reserve space for stats (3 lines) and padding
 	chartHeight := 12
-	maxCandles := width - 20 // Leave room for price axis
+	maxCandles := width - 20
 	if maxCandles < 20 {
 		maxCandles = 20
 	}
@@ -79,23 +74,21 @@ func NewBacktestUI(totalBars int, startEquity decimal.Decimal) *BacktestUI {
 		startEquity: startEquity,
 		equity:      startEquity,
 		width:       width,
-		height:      height,
 	}
 }
 
 // Start initializes the UI
 func (ui *BacktestUI) Start() {
 	fmt.Print(HideCursor)
-	fmt.Println() // Initial newline
 }
 
 // Stop cleans up the UI
 func (ui *BacktestUI) Stop() {
 	fmt.Print(ShowCursor)
-	fmt.Println() // Final newline
+	fmt.Println()
 }
 
-// AddCandle adds a new candle and updates display
+// AddCandle adds a new candle
 func (ui *BacktestUI) AddCandle(c Candle) {
 	ui.candles = append(ui.candles, c)
 	if len(ui.candles) > ui.maxCandles {
@@ -114,31 +107,59 @@ func (ui *BacktestUI) UpdateStats(equity decimal.Decimal, trades int, winRate de
 	}
 }
 
-// Render draws the current state
+// Render draws single-line progress (overwrites in place)
 func (ui *BacktestUI) Render() {
-	// Move cursor up to overwrite previous frame
-	if ui.linesPrinted > 0 {
-		fmt.Printf("\033[%dA", ui.linesPrinted)
-	}
-
-	var lines []string
-
-	// Progress bar
 	progress := float64(ui.currentBar) / float64(ui.totalBars)
-	progressWidth := ui.width - 30
-	if progressWidth < 20 {
-		progressWidth = 20
+	if ui.totalBars == 0 {
+		progress = 0
 	}
-	filled := int(progress * float64(progressWidth))
-	progressBar := strings.Repeat("█", filled) + strings.Repeat("░", progressWidth-filled)
-	lines = append(lines, fmt.Sprintf("%s%s %.1f%% [%d/%d]%s",
-		ColorCyan, progressBar, progress*100, ui.currentBar, ui.totalBars, ColorReset))
 
-	// Chart
+	// Calculate P&L
+	pnlPct := decimal.Zero
+	if !ui.startEquity.IsZero() {
+		pnlPct = ui.equity.Sub(ui.startEquity).Div(ui.startEquity).Mul(decimal.NewFromInt(100))
+	}
+	pnlColor := ColorGreen
+	pnlSign := "+"
+	if pnlPct.LessThan(decimal.Zero) {
+		pnlColor = ColorRed
+		pnlSign = ""
+	}
+
+	// Progress bar width
+	barWidth := 40
+	filled := int(progress * float64(barWidth))
+	if filled > barWidth {
+		filled = barWidth
+	}
+	progressBar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+
+	// Single line: progress + equity + trades
+	line := fmt.Sprintf("%s%s%s %.1f%% │ $%.0f (%s%s%.1f%%%s) │ Trades: %d │ Win: %.1f%%",
+		MoveToStart,
+		ColorCyan, progressBar, progress*100,
+		ui.equity.InexactFloat64(),
+		pnlColor, pnlSign, pnlPct.Abs().InexactFloat64(), ColorReset,
+		ui.trades,
+		ui.winRate.InexactFloat64(),
+	)
+
+	fmt.Print(ClearLine + line)
+}
+
+// RenderFinal draws the complete chart at the end
+func (ui *BacktestUI) RenderFinal() {
+	// Clear the progress line and move to new line
+	fmt.Print(ClearLine + MoveToStart)
+	fmt.Println()
+
+	// Print chart
 	chartLines := ui.renderChart()
-	lines = append(lines, chartLines...)
+	for _, line := range chartLines {
+		fmt.Println(line)
+	}
 
-	// Stats line
+	// Print stats
 	pnlPct := decimal.Zero
 	if !ui.startEquity.IsZero() {
 		pnlPct = ui.equity.Sub(ui.startEquity).Div(ui.startEquity).Mul(decimal.NewFromInt(100))
@@ -148,31 +169,17 @@ func (ui *BacktestUI) Render() {
 		pnlColor = ColorRed
 	}
 
-	statsLine := fmt.Sprintf("%sEquity:%s $%.0f (%s%+.2f%%%s) │ %sTrades:%s %d │ %sWin:%s %.1f%% │ %sSignal:%s %s",
+	fmt.Printf("%sEquity:%s $%.0f (%s%+.2f%%%s) │ %sTrades:%s %d │ %sWin:%s %.1f%%\n",
 		ColorBold, ColorReset, ui.equity.InexactFloat64(),
 		pnlColor, pnlPct.InexactFloat64(), ColorReset,
 		ColorBold, ColorReset, ui.trades,
-		ColorBold, ColorReset, ui.winRate.InexactFloat64(),
-		ColorBold, ColorReset, ui.lastSignal)
-	lines = append(lines, statsLine)
-
-	// Print all lines
-	for _, line := range lines {
-		fmt.Print(ClearLine)
-		fmt.Println(line)
-	}
-
-	ui.linesPrinted = len(lines)
+		ColorBold, ColorReset, ui.winRate.InexactFloat64())
 }
 
 // renderChart creates ASCII candlestick chart
 func (ui *BacktestUI) renderChart() []string {
 	if len(ui.candles) < 2 {
-		lines := make([]string, ui.chartHeight)
-		for i := range lines {
-			lines[i] = ColorDim + "│" + ColorReset
-		}
-		return lines
+		return []string{ColorDim + "(not enough data for chart)" + ColorReset}
 	}
 
 	// Find price range
@@ -187,7 +194,7 @@ func (ui *BacktestUI) renderChart() []string {
 		}
 	}
 
-	// Add padding to price range
+	// Add padding
 	priceRange := maxPrice.Sub(minPrice)
 	if priceRange.IsZero() {
 		priceRange = decimal.NewFromInt(1)
@@ -197,7 +204,7 @@ func (ui *BacktestUI) renderChart() []string {
 	maxPrice = maxPrice.Add(padding)
 	priceRange = maxPrice.Sub(minPrice)
 
-	// Build chart matrix
+	// Build chart
 	height := ui.chartHeight
 	width := len(ui.candles)
 	chart := make([][]rune, height)
@@ -219,13 +226,11 @@ func (ui *BacktestUI) renderChart() []string {
 			color = ColorGreen
 		}
 
-		// Convert prices to y coordinates (0 = top, height-1 = bottom)
 		highY := priceToY(candle.High, minPrice, priceRange, height)
 		lowY := priceToY(candle.Low, minPrice, priceRange, height)
 		openY := priceToY(candle.Open, minPrice, priceRange, height)
 		closeY := priceToY(candle.Close, minPrice, priceRange, height)
 
-		// Body top and bottom
 		bodyTop := openY
 		bodyBottom := closeY
 		if closeY < openY {
@@ -244,22 +249,18 @@ func (ui *BacktestUI) renderChart() []string {
 		// Draw body
 		for y := bodyTop; y <= bodyBottom; y++ {
 			if y >= 0 && y < height {
-				if isGreen {
-					chart[y][x] = '█'
-				} else {
-					chart[y][x] = '█'
-				}
+				chart[y][x] = '█'
 				colors[y][x] = color
 			}
 		}
 	}
 
-	// Convert to strings with price axis
+	// Convert to strings
 	lines := make([]string, height)
 	for y := 0; y < height; y++ {
 		var sb strings.Builder
 
-		// Price label (every 3 rows)
+		// Price label
 		if y%(height/4) == 0 {
 			price := yToPrice(y, minPrice, priceRange, height)
 			sb.WriteString(fmt.Sprintf("%s%7.1f%s │", ColorDim, price.InexactFloat64(), ColorReset))
@@ -267,24 +268,21 @@ func (ui *BacktestUI) renderChart() []string {
 			sb.WriteString(fmt.Sprintf("%s        │%s", ColorDim, ColorReset))
 		}
 
-		// Chart content
 		for x := 0; x < width; x++ {
 			sb.WriteString(colors[y][x])
 			sb.WriteRune(chart[y][x])
 		}
 		sb.WriteString(ColorReset)
-
 		lines[y] = sb.String()
 	}
 
-	// Add bottom axis
+	// Bottom axis
 	axisLine := strings.Repeat("─", width)
 	lines = append(lines, fmt.Sprintf("%s        └%s%s", ColorDim, axisLine, ColorReset))
 
 	return lines
 }
 
-// priceToY converts a price to y coordinate
 func priceToY(price, minPrice, priceRange decimal.Decimal, height int) int {
 	if priceRange.IsZero() {
 		return height / 2
@@ -294,23 +292,15 @@ func priceToY(price, minPrice, priceRange decimal.Decimal, height int) int {
 	return int(y.IntPart())
 }
 
-// yToPrice converts y coordinate back to price
 func yToPrice(y int, minPrice, priceRange decimal.Decimal, height int) decimal.Decimal {
 	normalized := decimal.NewFromInt(int64(height - 1 - y)).Div(decimal.NewFromInt(int64(height - 1)))
 	return minPrice.Add(priceRange.Mul(normalized))
 }
 
-// getTerminalSize returns terminal dimensions
 func getTerminalSize() (width, height int) {
 	width, height, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
-		return 80, 24 // Default
+		return 80, 24
 	}
 	return width, height
-}
-
-// ProgressLine prints a single updating progress line
-func ProgressLine(current, total int, message string) {
-	progress := float64(current) / float64(total) * 100
-	fmt.Printf("%s%s[%d/%d] %.1f%% - %s", ClearLine, MoveToStart, current, total, progress, message)
 }
