@@ -27,7 +27,7 @@ import (
 
 // Version information (set by build flags).
 var (
-	Version   = "1.1.0"
+	Version   = "1.2.0"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
@@ -158,6 +158,8 @@ func cmdBacktest(args []string) {
 			EntryStdDev:   decimal.RequireFromString("2.0"),
 			ATRMultiplier: decimal.NewFromFloat(cfg.Risk.StopLossATRMultiple),
 		})
+	case "grid":
+		strat = strategy.NewGrid(strategy.DefaultGridConfig())
 	default:
 		slog.Error("unknown strategy", "name", *strategyName)
 		os.Exit(1)
@@ -369,6 +371,8 @@ func cmdRun(args []string) {
 			EntryStdDev:   decimal.RequireFromString("2.0"),
 			ATRMultiplier: decimal.NewFromFloat(cfg.Risk.StopLossATRMultiple),
 		})
+	case "grid":
+		strat = strategy.NewGrid(strategy.DefaultGridConfig())
 	default:
 		slog.Error("unknown strategy", "name", *strategyName)
 		os.Exit(1)
