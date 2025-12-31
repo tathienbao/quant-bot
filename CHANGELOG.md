@@ -258,9 +258,72 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.8.0] - 2024-12-31
+
+### Phase 8: Broker Integration
+
+#### Added
+- **Broker Package** (`internal/broker/`)
+  - `Broker` interface: Standard interface for broker connectivity
+  - `AccountSummary`: Account information structure
+  - `Position`, `Order`: Position and order tracking
+  - `Contract`: Futures contract specification (MES, MGC)
+  - `GetFrontMonthExpiry()`: Automatic front month calculation
+
+- **IBKR Client** (`internal/broker/ibkr/`)
+  - `Client`: TWS/IB Gateway connection
+  - Socket-based IB API protocol implementation
+  - Rate limiting (45 req/sec)
+  - Auto-reconnect with configurable retry
+  - Market data subscription
+  - Order placement and cancellation
+  - Position tracking
+
+- **Paper Trading** (`internal/broker/paper/`)
+  - `Broker`: Full simulated broker for testing
+  - Slippage simulation
+  - Commission tracking
+  - Position P&L calculation
+  - Order fill simulation with delay
+  - No real connection required
+
+- **Trading Engine** (`internal/engine/`)
+  - `Engine`: Coordinates broker, risk, strategy
+  - Main trading loop with market data processing
+  - Signal generation and order execution
+  - Equity update loop
+  - Kill switch handling
+  - Graceful shutdown
+
+- **Configuration**
+  - `BrokerConfig`: Broker connection settings
+  - Support for IBKR and paper trading modes
+
+#### Technical Details
+- TWS ports: 7497 (paper), 7496 (live)
+- Gateway ports: 4002 (paper), 4001 (live)
+- Paper broker simulates realistic execution
+- Full P&L tracking with realized/unrealized
+
+#### Testing Flow
+```
+1. Paper Trading (internal simulation)
+   └─> No connection needed, instant feedback
+
+2. IBKR Paper Account (real-time simulation)
+   └─> Real market data, simulated execution
+   └─> Connect to TWS paper account (port 7497)
+
+3. IBKR Live Trading (production)
+   └─> Real money, real execution
+   └─> Connect to TWS live account (port 7496)
+```
+
+---
+
 ## [Unreleased]
 
 ### Planned for 1.0.0 (Production Ready)
-- [ ] Live broker integration (IBKR, TradeStation)
 - [ ] Full test coverage
 - [ ] Documentation
+- [ ] Production hardening

@@ -68,9 +68,9 @@ backtest:
   slippage_ticks: 1                # Simulated slippage
   commission_per_contract: 1.5     # USD round-trip commission
 
-# Broker configuration (for live trading)
-# broker:
-#   type: "interactive_brokers"    # interactive_brokers | tradestation | ninjatrader
-#   host: "127.0.0.1"
-#   port: 7497                     # TWS: 7497 (paper), 7496 (live)
-#   client_id: 1
+# Broker configuration
+broker:
+  type: "paper"                   # paper | ibkr
+  host: "127.0.0.1"
+  port: 7497                       # TWS: 7497 (paper), 7496 (live)
+  client_id: 1                     # IB Gateway: 4002 (paper), 4001 (live)

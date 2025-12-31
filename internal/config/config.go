@@ -25,6 +25,7 @@ type Config struct {
 	Alerting    AlertingConfig    `yaml:"alerting"`
 	Metrics     MetricsConfig     `yaml:"metrics"`
 	Backtest    BacktestConfig    `yaml:"backtest"`
+	Broker      BrokerConfig      `yaml:"broker"`
 }
 
 // AccountConfig holds account-related settings.
@@ -112,6 +113,14 @@ type MetricsConfig struct {
 type BacktestConfig struct {
 	SlippageTicks         int     `yaml:"slippage_ticks"`
 	CommissionPerContract float64 `yaml:"commission_per_contract"`
+}
+
+// BrokerConfig holds broker settings.
+type BrokerConfig struct {
+	Type     string `yaml:"type"`      // ibkr, paper
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	ClientID int    `yaml:"client_id"`
 }
 
 // Load loads configuration from a YAML file.
