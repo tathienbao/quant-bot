@@ -321,6 +321,45 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [1.3.0] - 2024-12-31
+
+### Interactive CLI & Grid Strategy
+
+#### Added
+- **Grid/Rebound Strategy** (`internal/strategy/grid.go`)
+  - Counter-trend strategy based on "raw math" approach
+  - Two configurations:
+    - `grid` (Original): +51.94% return, 91.05% win rate, 458 trades
+    - `grid-conservative`: +33.54% return, 85.41% win rate, 233 trades
+  - Parameters: GridSpacingPct, ReboundPct, MaxGridLevels, LookbackBars, StopLossPct
+  - Optimized for M5/M15 timeframe on MES
+
+- **Interactive CLI**
+  - Arrow key navigation for strategy/data file selection
+  - `-i` flag for interactive mode: `./bin/quant-bot backtest -i`
+  - Visual display of strategy performance metrics
+  - Auto-discovery of CSV files in `data/` directory
+
+- **Strategy Documentation**
+  - ASCII table comments at top of each strategy file
+  - Backtest results, parameters, and CLI usage examples
+  - Clear recommendations (✅ khuyến nghị / ⚠️ không khuyến nghị)
+
+- **Sample Data**
+  - `data/MES_5m.csv`: 13,208 bars (2.5 months M5 data)
+  - `data/MES_1d.csv`: 253 bars (1 year daily data)
+
+#### Changed
+- Updated README with strategy comparison table
+- Backtest command defaults to interactive selection when no flags provided
+
+#### Technical Details
+- Uses `github.com/manifoldco/promptui` for interactive CLI
+- Grid strategy tracks swing high/low over lookback period
+- Enters counter-trend at grid levels, exits on 10-20% rebound
+
+---
+
 ## [1.0.0] - 2024-12-31
 
 ### Production Ready - Maximum Test Coverage

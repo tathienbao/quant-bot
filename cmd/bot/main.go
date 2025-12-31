@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/manifoldco/promptui"
 	"github.com/shopspring/decimal"
 	"github.com/tathienbao/quant-bot/internal/alerting"
 	"github.com/tathienbao/quant-bot/internal/backtest"
@@ -27,7 +29,7 @@ import (
 
 // Version information (set by build flags).
 var (
-	Version   = "1.2.0"
+	Version   = "1.3.0"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
@@ -78,6 +80,116 @@ Examples:
 Use "quant-bot <command> --help" for more information about a command.`)
 }
 
+// strategyOption represents a strategy choice in the menu.
+type strategyOption struct {
+	Name        string
+	Description string
+	Return      string
+	WinRate     string
+	Recommended bool
+}
+
+// selectStrategy shows an interactive menu to select a strategy.
+func selectStrategy() string {
+	options := []strategyOption{
+		{
+			Name:        "grid",
+			Description: "Grid/Rebound - High Frequency (max return)",
+			Return:      "+51.94%",
+			WinRate:     "91.05%",
+			Recommended: true,
+		},
+		{
+			Name:        "grid-conservative",
+			Description: "Grid/Rebound - Conservative (low risk)",
+			Return:      "+33.54%",
+			WinRate:     "85.41%",
+			Recommended: false,
+		},
+		{
+			Name:        "breakout",
+			Description: "Range Breakout (không khuyến nghị)",
+			Return:      "-11.59%",
+			WinRate:     "0%",
+			Recommended: false,
+		},
+		{
+			Name:        "meanrev",
+			Description: "Mean Reversion (không khuyến nghị)",
+			Return:      "-3.62%",
+			WinRate:     "20%",
+			Recommended: false,
+		},
+	}
+
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}",
+		Active:   "▸ {{ .Name | cyan }} - {{ .Description }} (Return: {{ .Return }}, WR: {{ .WinRate }}){{ if .Recommended }} ⭐{{ end }}",
+		Inactive: "  {{ .Name | white }} - {{ .Description }} (Return: {{ .Return }}, WR: {{ .WinRate }}){{ if .Recommended }} ⭐{{ end }}",
+		Selected: "✔ Strategy: {{ .Name | green }}",
+	}
+
+	prompt := promptui.Select{
+		Label:     "Chọn Strategy (↑↓ để di chuyển, Enter để chọn)",
+		Items:     options,
+		Templates: templates,
+		Size:      6,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Selection cancelled\n")
+		os.Exit(1)
+	}
+
+	return options[idx].Name
+}
+
+// selectDataFile shows an interactive menu to select a data file.
+func selectDataFile() string {
+	// Find CSV files in data directory
+	files, err := filepath.Glob("data/*.csv")
+	if err != nil || len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "No CSV files found in data/ directory\n")
+		os.Exit(1)
+	}
+
+	type fileOption struct {
+		Path string
+		Name string
+	}
+
+	options := make([]fileOption, len(files))
+	for i, f := range files {
+		options[i] = fileOption{
+			Path: f,
+			Name: filepath.Base(f),
+		}
+	}
+
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}",
+		Active:   "▸ {{ .Name | cyan }}",
+		Inactive: "  {{ .Name | white }}",
+		Selected: "✔ Data file: {{ .Name | green }}",
+	}
+
+	prompt := promptui.Select{
+		Label:     "Chọn Data File (↑↓ để di chuyển, Enter để chọn)",
+		Items:     options,
+		Templates: templates,
+		Size:      6,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Selection cancelled\n")
+		os.Exit(1)
+	}
+
+	return options[idx].Path
+}
+
 func cmdVersion() {
 	fmt.Printf("quant-bot version %s\n", Version)
 	fmt.Printf("  Build time: %s\n", BuildTime)
@@ -105,15 +217,20 @@ func cmdValidate(args []string) {
 func cmdBacktest(args []string) {
 	fs := flag.NewFlagSet("backtest", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "Path to configuration file")
-	dataPath := fs.String("data", "", "Path to CSV data file (required)")
-	strategyName := fs.String("strategy", "breakout", "Strategy: breakout, meanrev")
+	dataPath := fs.String("data", "", "Path to CSV data file (interactive if empty)")
+	strategyName := fs.String("strategy", "", "Strategy (interactive if empty)")
 	verbose := fs.Bool("verbose", false, "Verbose output")
+	interactive := fs.Bool("i", false, "Force interactive mode")
 	fs.Parse(args)
 
-	if *dataPath == "" {
-		fmt.Fprintln(os.Stderr, "Error: --data is required")
-		fs.Usage()
-		os.Exit(1)
+	// Interactive mode for data file
+	if *dataPath == "" || *interactive {
+		*dataPath = selectDataFile()
+	}
+
+	// Interactive mode for strategy
+	if *strategyName == "" || *interactive {
+		*strategyName = selectStrategy()
 	}
 
 	// Setup logging
@@ -159,7 +276,9 @@ func cmdBacktest(args []string) {
 			ATRMultiplier: decimal.NewFromFloat(cfg.Risk.StopLossATRMultiple),
 		})
 	case "grid":
-		strat = strategy.NewGrid(strategy.DefaultGridConfig())
+		strat = strategy.NewGrid(strategy.OriginalGridConfig())
+	case "grid-conservative":
+		strat = strategy.NewGrid(strategy.ConservativeGridConfig())
 	default:
 		slog.Error("unknown strategy", "name", *strategyName)
 		os.Exit(1)
@@ -231,10 +350,21 @@ func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "Path to configuration file")
 	paperMode := fs.Bool("paper", true, "Paper trading mode (default: true)")
-	dataPath := fs.String("data", "", "Path to CSV data file (for paper mode simulation)")
-	strategyName := fs.String("strategy", "breakout", "Strategy: breakout, meanrev")
+	dataPath := fs.String("data", "", "Path to CSV data file (interactive if empty)")
+	strategyName := fs.String("strategy", "", "Strategy (interactive if empty)")
 	barDelay := fs.Duration("bar-delay", 100*time.Millisecond, "Delay between bars in simulation")
+	interactive := fs.Bool("i", false, "Force interactive mode")
 	fs.Parse(args)
+
+	// Interactive mode for strategy
+	if *strategyName == "" || *interactive {
+		*strategyName = selectStrategy()
+	}
+
+	// Interactive mode for data file (paper mode only)
+	if *paperMode && (*dataPath == "" || *interactive) {
+		*dataPath = selectDataFile()
+	}
 
 	// Setup structured logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -372,7 +502,9 @@ func cmdRun(args []string) {
 			ATRMultiplier: decimal.NewFromFloat(cfg.Risk.StopLossATRMultiple),
 		})
 	case "grid":
-		strat = strategy.NewGrid(strategy.DefaultGridConfig())
+		strat = strategy.NewGrid(strategy.OriginalGridConfig())
+	case "grid-conservative":
+		strat = strategy.NewGrid(strategy.ConservativeGridConfig())
 	default:
 		slog.Error("unknown strategy", "name", *strategyName)
 		os.Exit(1)

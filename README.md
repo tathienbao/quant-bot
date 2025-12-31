@@ -24,8 +24,11 @@ make build
 # Validate config file
 ./bin/quant-bot validate --config config.yaml
 
-# Run backtest
-./bin/quant-bot backtest --config config.yaml --data data/MES_5m.csv --strategy breakout
+# Run backtest (interactive mode - recommended)
+./bin/quant-bot backtest -i
+
+# Run backtest (command line)
+./bin/quant-bot backtest --config config.yaml --data data/MES_5m.csv --strategy grid
 
 # Start bot (paper trading)
 ./bin/quant-bot run --config config.yaml --paper
@@ -44,12 +47,27 @@ make build
 ### Backtest Options
 
 ```bash
+# Interactive mode (arrow keys to select strategy/data file)
+./bin/quant-bot backtest -i
+
+# Or specify options directly
 ./bin/quant-bot backtest \
   --config config.yaml \
   --data data/MES_5m.csv \
-  --strategy breakout \  # breakout | meanrev
-  --verbose              # Enable debug logging
+  --strategy grid \       # grid | grid-conservative | breakout | meanrev
+  --verbose               # Enable debug logging
 ```
+
+### Available Strategies
+
+| Strategy | Return | Win Rate | Recommendation |
+|----------|--------|----------|----------------|
+| `grid` | +51.94% | 91.05% | ✅ Best performance |
+| `grid-conservative` | +33.54% | 85.41% | ✅ Lower risk |
+| `breakout` | -11.59% | 0% | ⚠️ Not recommended |
+| `meanrev` | -3.62% | 20% | ⚠️ Not recommended |
+
+*Results based on MES M5 data, $100k equity, 1% risk/trade, 2.5 months*
 
 ### Configuration
 
