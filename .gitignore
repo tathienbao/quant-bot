@@ -1,0 +1,70 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage/
+coverage.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Application
+config.yaml
+config.yml
+*.local.yaml
+*.local.yml
+
+# Data files
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Secrets (never commit these!)
+*.pem
+*.key
+*.crt
+credentials.json
+secrets.yaml
+secrets.yml
+
+# Backtest results
+backtest_results/
+results/
+
+# Temporary files
+tmp/
+temp/

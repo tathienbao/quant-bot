@@ -1,0 +1,76 @@
+# Quant Trading Bot Configuration Example
+# Copy this file to config.yaml and adjust values
+
+account:
+  starting_equity: 1000.0          # Initial account equity in USD
+  max_global_drawdown_pct: 0.20    # 20% - Kill switch threshold
+  risk_per_trade_pct: 0.01         # 1% - Max risk per trade
+
+market:
+  instrument_primary: "MES"        # Micro E-mini S&P 500
+  instrument_secondary: "MGC"      # Micro Gold (Phase 2)
+  timeframe: "5m"                  # Strategy timeframe
+  timezone: "America/Chicago"      # CME timezone
+  session_start: "17:00"           # Sunday 5pm CT
+  session_end: "16:00"             # Friday 4pm CT
+  daily_break_start: "16:00"       # Daily maintenance start
+  daily_break_end: "17:00"         # Daily maintenance end
+  session_close_cutoff_min: 15     # Close positions X min before session end
+
+risk:
+  volatility_lookback_bars: 20     # Bars for ATR calculation
+  stop_loss_atr_multiple: 2.0      # Stop loss = 2 * ATR
+  take_profit_atr_multiple: 3.0    # Take profit = 3 * ATR
+  max_exposure_per_symbol_pct: 0.5 # 50% max per symbol
+  max_total_exposure_pct: 1.0      # 100% max total
+
+execution:
+  order_timeout_sec: 5             # Order timeout
+  max_retries: 2                   # Max retry attempts
+  retry_delay_ms: 500              # Delay between retries
+  rate_limit_per_second: 10        # Broker API rate limit
+
+health:
+  heartbeat_interval_sec: 5        # Health check interval
+  max_missed_heartbeats: 3         # Miss count before SAFE MODE
+  data_staleness_threshold_sec: 10 # Max data age
+
+shutdown:
+  timeout_sec: 30                  # Graceful shutdown timeout
+  close_positions_on_shutdown: false  # Keep positions on shutdown
+
+persistence:
+  enabled: true
+  type: "sqlite"                   # sqlite | postgres
+  path: "./data/state.db"          # SQLite file path
+  # dsn: "postgres://user:pass@localhost:5432/quantbot?sslmode=disable"
+  snapshot_interval_sec: 60        # Periodic state snapshot
+
+alerting:
+  enabled: true
+  channels:
+    - type: "telegram"
+      bot_token: "${TELEGRAM_BOT_TOKEN}"    # Set via environment variable
+      chat_id: "${TELEGRAM_CHAT_ID}"        # Set via environment variable
+    # - type: "discord"
+    #   webhook_url: "${DISCORD_WEBHOOK}"
+  events:
+    - kill_switch_activated
+    - connection_lost
+    - daily_summary
+
+metrics:
+  enabled: true
+  port: 9090                       # Prometheus endpoint port
+  path: "/metrics"                 # Metrics path
+
+backtest:
+  slippage_ticks: 1                # Simulated slippage
+  commission_per_contract: 1.5     # USD round-trip commission
+
+# Broker configuration (for live trading)
+# broker:
+#   type: "interactive_brokers"    # interactive_brokers | tradestation | ninjatrader
+#   host: "127.0.0.1"
+#   port: 7497                     # TWS: 7497 (paper), 7496 (live)
+#   client_id: 1
