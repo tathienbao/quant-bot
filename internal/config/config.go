@@ -253,3 +253,20 @@ func (c *Config) ShutdownTimeout() time.Duration {
 func (c *Config) SnapshotInterval() time.Duration {
 	return time.Duration(c.Persistence.SnapshotIntervalSec) * time.Second
 }
+
+// IsAlertEventEnabled checks if an alert event type is enabled.
+func (c *Config) IsAlertEventEnabled(event string) bool {
+	if !c.Alerting.Enabled {
+		return false
+	}
+	// If no events specified, all are enabled
+	if len(c.Alerting.Events) == 0 {
+		return true
+	}
+	for _, e := range c.Alerting.Events {
+		if e == event || e == "all" {
+			return true
+		}
+	}
+	return false
+}

@@ -192,16 +192,44 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.6.0] - 2024-12-31
+
+### Phase 6: Alerting
+
+#### Added
+- **Alerting Package** (`internal/alerting/`)
+  - `Alerter` interface: Standard interface for alert channels
+  - `Severity` levels: Info, Warning, High, Critical with emoji support
+  - `AlertEvent` types: Pre-defined events (kill switch, trades, bot lifecycle)
+  - `TelegramAlerter`: Full Telegram Bot API integration
+    - HTML formatting with emojis
+    - Structured fields display
+    - Daily summary reports
+  - `ConsoleAlerter`: Log-based alerter for development
+  - `MultiAlerter`: Fan-out to multiple channels concurrently
+  - `MockAlerter`: Testing helper with assertion methods
+  - `DailySummary`: Trading day statistics struct
+
+- **Integration**
+  - Alerter initialization from config
+  - Bot started/stopped alerts
+  - Graceful shutdown with alert notification
+
+#### Technical Details
+- Concurrent alert dispatch with error aggregation
+- Thread-safe mock alerter for testing
+- Config-driven channel selection
+- Event-to-severity mapping
+
+---
+
 ## [Unreleased]
 
-### Planned for 0.6.0 (Phase 6: Alerting)
-- [ ] Telegram alerting
-- [ ] Event-based notifications
-- [ ] Daily summary reports
+### Planned for 0.7.0 (Phase 7: Metrics)
+- [ ] Prometheus metrics (orders, equity, drawdown, latency)
+- [ ] Health check endpoint
 
 ### Planned for 1.0.0 (Production Ready)
-- [ ] Live broker integration
-- [ ] Persistence layer
-- [ ] Alerting (Telegram)
-- [ ] Prometheus metrics
+- [ ] Live broker integration (IBKR, TradeStation)
 - [ ] Full test coverage
+- [ ] Documentation

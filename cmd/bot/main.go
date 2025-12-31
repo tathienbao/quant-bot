@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"github.com/tathienbao/quant-bot/internal/alerting"
 	"github.com/tathienbao/quant-bot/internal/backtest"
 	"github.com/tathienbao/quant-bot/internal/config"
 	"github.com/tathienbao/quant-bot/internal/execution"
@@ -23,7 +24,7 @@ import (
 
 // Version information (set by build flags).
 var (
-	Version   = "0.5.0"
+	Version   = "0.6.0"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
@@ -280,6 +281,9 @@ func cmdRun(args []string) {
 		}
 	}
 
+	// Initialize alerter
+	alerter := createAlerter(cfg, logger)
+
 	// Initialize risk engine
 	riskEngine := risk.NewEngine(cfg.ToRiskConfig(), cfg.StartingEquityDecimal(), logger)
 	_ = riskEngine // TODO: Use in trading loop
@@ -288,6 +292,18 @@ func cmdRun(args []string) {
 		"max_drawdown", cfg.Account.MaxGlobalDrawdownPct,
 		"risk_per_trade", cfg.Account.RiskPerTradePct,
 	)
+
+	// Send bot started alert
+	if cfg.Alerting.Enabled {
+		if err := alerter.Alert(ctx, alerting.SeverityInfo, "Bot started",
+			"version", Version,
+			"mode", mode,
+			"instrument", cfg.Market.InstrumentPrimary,
+			"equity", cfg.Account.StartingEquity,
+		); err != nil {
+			slog.Warn("failed to send start alert", "err", err)
+		}
+	}
 
 	// TODO: Phase 6+ implementations
 	// - Initialize broker connection
@@ -308,14 +324,28 @@ func cmdRun(args []string) {
 	defer cancel()
 
 	// Perform shutdown tasks
-	if err := shutdownWithPersistence(shutdownCtx, cfg, repo, riskEngine); err != nil {
+	if err := shutdownWithPersistence(shutdownCtx, cfg, repo, riskEngine, alerter); err != nil {
 		slog.Error("shutdown error", "err", err)
+	}
+
+	// Send shutdown alert
+	if cfg.Alerting.Enabled {
+		// Use background context since main ctx is cancelled
+		alertCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := alerter.Alert(alertCtx, alerting.SeverityInfo, "Bot stopped",
+			"version", Version,
+			"mode", mode,
+		); err != nil {
+			slog.Warn("failed to send stop alert", "err", err)
+		}
+		cancel()
 	}
 
 	slog.Info("quant-bot shutdown complete")
 }
 
-func shutdownWithPersistence(ctx context.Context, cfg *config.Config, repo *persistence.SQLiteRepository, riskEngine *risk.Engine) error {
+func shutdownWithPersistence(ctx context.Context, cfg *config.Config, repo *persistence.SQLiteRepository, riskEngine *risk.Engine, alerter alerting.Alerter) error {
+	_ = alerter // Available for future use in shutdown steps
 	slog.Info("starting graceful shutdown",
 		"timeout", cfg.ShutdownTimeout(),
 	)
@@ -376,4 +406,38 @@ func shutdownWithPersistence(ctx context.Context, cfg *config.Config, repo *pers
 	time.Sleep(100 * time.Millisecond)
 
 	return nil
+}
+
+// createAlerter creates an alerter based on configuration.
+func createAlerter(cfg *config.Config, logger *slog.Logger) alerting.Alerter {
+	if !cfg.Alerting.Enabled {
+		// Return console alerter for logging only
+		return alerting.NewConsoleAlerter(logger)
+	}
+
+	var alerters []alerting.Alerter
+
+	// Always add console alerter
+	alerters = append(alerters, alerting.NewConsoleAlerter(logger))
+
+	// Add configured channels
+	for _, ch := range cfg.Alerting.Channels {
+		switch ch.Type {
+		case "telegram":
+			if ch.BotToken != "" && ch.ChatID != "" {
+				telegramAlerter := alerting.NewTelegramAlerter(alerting.TelegramConfig{
+					BotToken: ch.BotToken,
+					ChatID:   ch.ChatID,
+				})
+				alerters = append(alerters, telegramAlerter)
+				slog.Info("telegram alerter configured", "chat_id", ch.ChatID)
+			} else {
+				slog.Warn("telegram channel missing bot_token or chat_id")
+			}
+		default:
+			slog.Warn("unknown alert channel type", "type", ch.Type)
+		}
+	}
+
+	return alerting.NewMultiAlerter(logger, alerters...)
 }
