@@ -14,7 +14,9 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/tathienbao/quant-bot/internal/alerting"
 	"github.com/tathienbao/quant-bot/internal/backtest"
+	"github.com/tathienbao/quant-bot/internal/broker/paper"
 	"github.com/tathienbao/quant-bot/internal/config"
+	"github.com/tathienbao/quant-bot/internal/engine"
 	"github.com/tathienbao/quant-bot/internal/execution"
 	"github.com/tathienbao/quant-bot/internal/metrics"
 	"github.com/tathienbao/quant-bot/internal/observer"
@@ -25,7 +27,7 @@ import (
 
 // Version information (set by build flags).
 var (
-	Version   = "1.0.0"
+	Version   = "1.1.0"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
@@ -227,6 +229,9 @@ func cmdRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "Path to configuration file")
 	paperMode := fs.Bool("paper", true, "Paper trading mode (default: true)")
+	dataPath := fs.String("data", "", "Path to CSV data file (for paper mode simulation)")
+	strategyName := fs.String("strategy", "breakout", "Strategy: breakout, meanrev")
+	barDelay := fs.Duration("bar-delay", 100*time.Millisecond, "Delay between bars in simulation")
 	fs.Parse(args)
 
 	// Setup structured logging
@@ -348,16 +353,93 @@ func cmdRun(args []string) {
 		}
 	}
 
-	// TODO: Phase 7+ implementations
-	// - Initialize broker connection
-	// - Start market data feed
-	// - Start trading loop
+	// Initialize strategy
+	var strat strategy.Strategy
+	switch *strategyName {
+	case "breakout":
+		strat = strategy.NewBreakout(strategy.BreakoutConfig{
+			LookbackBars:   cfg.Risk.VolatilityLookbackBars,
+			ATRMultiplier:  decimal.NewFromFloat(cfg.Risk.StopLossATRMultiple),
+			BreakoutBuffer: decimal.Zero,
+		})
+	case "meanrev":
+		strat = strategy.NewMeanReversion(strategy.MeanRevConfig{
+			SMAPeriod:     20,
+			StdDevPeriod:  20,
+			EntryStdDev:   decimal.RequireFromString("2.0"),
+			ATRMultiplier: decimal.NewFromFloat(cfg.Risk.StopLossATRMultiple),
+		})
+	default:
+		slog.Error("unknown strategy", "name", *strategyName)
+		os.Exit(1)
+	}
 
-	slog.Warn("live trading not yet implemented, waiting for shutdown signal...")
+	// Initialize calculator
+	calculator := observer.NewCalculator(observer.CalculatorConfig{
+		ATRPeriod:    cfg.Risk.VolatilityLookbackBars,
+		StdDevPeriod: 20,
+	})
+
+	// Initialize broker
+	var tradingEngine *engine.Engine
+	if *paperMode {
+		// Paper trading mode
+		paperCfg := paper.Config{
+			InitialEquity:     cfg.StartingEquityDecimal(),
+			SlippageTicks:     cfg.Backtest.SlippageTicks,
+			CommissionPerSide: decimal.NewFromFloat(cfg.Backtest.CommissionPerContract / 2),
+			FillDelay:         50 * time.Millisecond,
+		}
+		paperBroker := paper.NewBroker(paperCfg, logger)
+
+		if err := paperBroker.Connect(ctx); err != nil {
+			slog.Error("failed to connect paper broker", "err", err)
+			os.Exit(1)
+		}
+
+		// Create engine
+		engineCfg := engine.Config{
+			Symbol:               cfg.Market.InstrumentPrimary,
+			Timeframe:            5 * time.Minute,
+			EquityUpdateInterval: 1 * time.Minute,
+		}
+		tradingEngine = engine.NewEngine(
+			engineCfg,
+			paperBroker,
+			riskEngine,
+			strat,
+			calculator,
+			alerter,
+			logger,
+		)
+
+		// Start engine
+		if err := tradingEngine.Start(ctx); err != nil {
+			slog.Error("failed to start trading engine", "err", err)
+			os.Exit(1)
+		}
+
+		// If data file provided, stream it to the paper broker
+		if *dataPath != "" {
+			go streamDataToPaperBroker(ctx, *dataPath, cfg.Market.InstrumentPrimary, paperBroker, *barDelay, logger)
+		} else {
+			slog.Warn("no data file provided, paper broker will wait for market data")
+		}
+	} else {
+		slog.Error("live trading not yet implemented")
+		os.Exit(1)
+	}
 
 	// Wait for shutdown signal
 	<-ctx.Done()
 	slog.Info("shutdown signal received")
+
+	// Stop trading engine
+	if tradingEngine != nil {
+		if err := tradingEngine.Stop(context.Background()); err != nil {
+			slog.Error("failed to stop trading engine", "err", err)
+		}
+	}
 
 	// Graceful shutdown with timeout
 	shutdownCtx, cancel := context.WithTimeout(
@@ -490,4 +572,49 @@ func createAlerter(cfg *config.Config, logger *slog.Logger) alerting.Alerter {
 	}
 
 	return alerting.NewMultiAlerter(logger, alerters...)
+}
+
+// streamDataToPaperBroker streams CSV data to the paper broker for simulation.
+func streamDataToPaperBroker(ctx context.Context, dataPath, symbol string, broker *paper.Broker, delay time.Duration, logger *slog.Logger) {
+	feed := observer.NewBacktestFeed(dataPath, symbol)
+
+	eventCh, err := feed.Subscribe(ctx, symbol)
+	if err != nil {
+		logger.Error("failed to subscribe to backtest feed", "err", err)
+		return
+	}
+
+	logger.Info("starting data stream to paper broker",
+		"file", dataPath,
+		"symbol", symbol,
+		"bar_delay", delay,
+	)
+
+	barCount := 0
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("data stream stopped", "bars_sent", barCount)
+			return
+		case event, ok := <-eventCh:
+			if !ok {
+				logger.Info("data stream completed", "bars_sent", barCount)
+				return
+			}
+
+			broker.SimulateMarketData(event)
+			barCount++
+
+			if barCount%50 == 0 {
+				logger.Info("data stream progress", "bars_sent", barCount)
+			}
+
+			// Delay between bars to simulate real-time
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+	}
 }
