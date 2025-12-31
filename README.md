@@ -1,5 +1,86 @@
 # Quant Trading Bot – MES / MGC – Risk-First Architecture
 
+## Quick Start
+
+### Prerequisites
+
+- Go 1.22+
+- CGO enabled (for SQLite)
+
+### Installation
+
+```bash
+git clone https://github.com/tathienbao/quant-bot.git
+cd quant-bot
+make build
+```
+
+### Usage
+
+```bash
+# Show version
+./bin/quant-bot version
+
+# Validate config file
+./bin/quant-bot validate --config config.yaml
+
+# Run backtest
+./bin/quant-bot backtest --config config.yaml --data data/MES_5m.csv --strategy breakout
+
+# Start bot (paper trading)
+./bin/quant-bot run --config config.yaml --paper
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `version` | Show version, build time, git commit |
+| `validate` | Validate configuration file |
+| `backtest` | Run backtest with historical data |
+| `run` | Start trading bot (paper/live) |
+| `help` | Show usage information |
+
+### Backtest Options
+
+```bash
+./bin/quant-bot backtest \
+  --config config.yaml \
+  --data data/MES_5m.csv \
+  --strategy breakout \  # breakout | meanrev
+  --verbose              # Enable debug logging
+```
+
+### Configuration
+
+Copy `config.example.yaml` to `config.yaml` and adjust:
+
+```yaml
+account:
+  starting_equity: 2000.0
+  max_global_drawdown_pct: 0.20
+  risk_per_trade_pct: 0.01
+
+market:
+  instrument_primary: "MES"
+  timeframe: "5m"
+```
+
+### Testing
+
+```bash
+# Run all tests
+make test
+
+# Run with race detector
+make test-race
+
+# Run fuzz tests
+go test -fuzz=FuzzPositionSizer -fuzztime=30s ./internal/risk/
+```
+
+---
+
 ## 1. Mục tiêu dự án
 
 Xây dựng một hệ thống trading bot cá nhân theo phong cách **Quant**, ưu tiên tuyệt đối cho:
