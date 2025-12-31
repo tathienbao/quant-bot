@@ -271,6 +271,16 @@ func (e *Engine) GetSnapshot() types.EquitySnapshot {
 	}
 }
 
+// CurrentEquity returns the current equity value.
+func (e *Engine) CurrentEquity() decimal.Decimal {
+	return e.hwm.Current()
+}
+
+// HighWaterMark returns the peak equity value.
+func (e *Engine) HighWaterMark() decimal.Decimal {
+	return e.hwm.Peak()
+}
+
 // Shutdown gracefully shuts down the engine.
 func (e *Engine) Shutdown(ctx context.Context) error {
 	e.mu.Lock()

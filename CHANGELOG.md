@@ -154,12 +154,50 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.5.0] - 2024-12-31
+
+### Phase 5: Persistence
+
+#### Added
+- **Persistence Package** (`internal/persistence/`)
+  - `Repository` interface: Complete abstraction for state persistence
+  - `SQLiteRepository`: Full SQLite implementation với:
+    - Equity snapshots (save, get latest, get history)
+    - Position management (save, get open, close)
+    - Trade history (save, query by time, query by symbol)
+    - Order tracking (save, get pending, update status)
+    - Bot state (save/restore for recovery)
+  - WAL mode enabled for better concurrent performance
+  - Automatic migrations on startup
+
+- **Recovery on Startup**
+  - Bot state restored from SQLite on run
+  - Logs recovered equity, high water mark, kill switch status
+  - Graceful handling when no previous state exists
+
+- **State Saving on Shutdown**
+  - Current equity and high water mark saved
+  - Kill switch / safe mode status preserved
+  - Integrated into graceful shutdown sequence
+
+- **Risk Engine Methods**
+  - `CurrentEquity()` - Get current equity value
+  - `HighWaterMark()` - Get peak equity value
+
+#### Technical Details
+- SQLite with `?_journal_mode=WAL&_busy_timeout=5000`
+- All decimal values stored as strings for precision
+- Comprehensive test coverage for all repository operations
+- CGO required for go-sqlite3 driver
+
+---
+
 ## [Unreleased]
 
-### Planned for 0.5.0 (Phase 5: Persistence)
-- [ ] SQLite state persistence
-- [ ] Recovery on startup
-- [ ] Trade history storage
+### Planned for 0.6.0 (Phase 6: Alerting)
+- [ ] Telegram alerting
+- [ ] Event-based notifications
+- [ ] Daily summary reports
 
 ### Planned for 1.0.0 (Production Ready)
 - [ ] Live broker integration

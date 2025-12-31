@@ -16,13 +16,14 @@ import (
 	"github.com/tathienbao/quant-bot/internal/config"
 	"github.com/tathienbao/quant-bot/internal/execution"
 	"github.com/tathienbao/quant-bot/internal/observer"
+	"github.com/tathienbao/quant-bot/internal/persistence"
 	"github.com/tathienbao/quant-bot/internal/risk"
 	"github.com/tathienbao/quant-bot/internal/strategy"
 )
 
 // Version information (set by build flags).
 var (
-	Version   = "0.4.0"
+	Version   = "0.5.0"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
@@ -256,6 +257,29 @@ func cmdRun(args []string) {
 		"equity", cfg.Account.StartingEquity,
 	)
 
+	// Initialize persistence if enabled
+	var repo *persistence.SQLiteRepository
+	if cfg.Persistence.Enabled {
+		repo, err = persistence.NewSQLiteRepository(cfg.Persistence.Path)
+		if err != nil {
+			slog.Error("failed to initialize persistence", "err", err)
+			os.Exit(1)
+		}
+		defer repo.Close()
+
+		slog.Info("persistence initialized", "path", cfg.Persistence.Path)
+
+		// Attempt recovery from saved state
+		if state, err := repo.GetState(ctx); err == nil && state != nil {
+			slog.Info("recovered state from persistence",
+				"equity", state.Equity,
+				"high_water", state.HighWaterMark,
+				"kill_switch", state.KillSwitchActive,
+				"total_trades", state.TotalTrades,
+			)
+		}
+	}
+
 	// Initialize risk engine
 	riskEngine := risk.NewEngine(cfg.ToRiskConfig(), cfg.StartingEquityDecimal(), logger)
 	_ = riskEngine // TODO: Use in trading loop
@@ -265,7 +289,7 @@ func cmdRun(args []string) {
 		"risk_per_trade", cfg.Account.RiskPerTradePct,
 	)
 
-	// TODO: Phase 5+ implementations
+	// TODO: Phase 6+ implementations
 	// - Initialize broker connection
 	// - Start market data feed
 	// - Start trading loop
@@ -284,14 +308,14 @@ func cmdRun(args []string) {
 	defer cancel()
 
 	// Perform shutdown tasks
-	if err := shutdown(shutdownCtx, cfg); err != nil {
+	if err := shutdownWithPersistence(shutdownCtx, cfg, repo, riskEngine); err != nil {
 		slog.Error("shutdown error", "err", err)
 	}
 
 	slog.Info("quant-bot shutdown complete")
 }
 
-func shutdown(ctx context.Context, cfg *config.Config) error {
+func shutdownWithPersistence(ctx context.Context, cfg *config.Config, repo *persistence.SQLiteRepository, riskEngine *risk.Engine) error {
 	slog.Info("starting graceful shutdown",
 		"timeout", cfg.ShutdownTimeout(),
 	)
@@ -310,7 +334,24 @@ func shutdown(ctx context.Context, cfg *config.Config) error {
 			return nil
 		}},
 		{"save state", func() error {
-			// TODO: Persist current state
+			if repo == nil {
+				return nil
+			}
+			// Save current bot state
+			state := persistence.BotState{
+				LastUpdated:      time.Now(),
+				Equity:           riskEngine.CurrentEquity(),
+				HighWaterMark:    riskEngine.HighWaterMark(),
+				KillSwitchActive: riskEngine.IsInSafeMode(),
+				SafeModeActive:   riskEngine.IsInSafeMode(),
+			}
+			if err := repo.SaveState(ctx, state); err != nil {
+				return fmt.Errorf("save bot state: %w", err)
+			}
+			slog.Info("state saved to persistence",
+				"equity", state.Equity,
+				"high_water", state.HighWaterMark,
+			)
 			return nil
 		}},
 		{"close connections", func() error {
