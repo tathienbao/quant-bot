@@ -17,8 +17,13 @@ BINARY_PATH=./bin/$(BINARY_NAME)
 # Main package
 MAIN_PKG=./cmd/bot
 
+# Version info
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+BUILD_TIME = $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
 # Build flags
-LDFLAGS=-ldflags "-s -w"
+LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT)"
 
 # Default target
 .DEFAULT_GOAL := help
@@ -111,7 +116,7 @@ backtest:
 		echo "Usage: make backtest DATA=./data/mes_2024.csv"; \
 		exit 1; \
 	fi
-	$(GORUN) $(MAIN_PKG) --mode=backtest --data=$(DATA)
+	$(GORUN) $(MAIN_PKG) backtest --data=$(DATA)
 
 ## clean: Clean build artifacts
 clean:

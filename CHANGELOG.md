@@ -124,13 +124,42 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.4.0] - 2024-12-31
+
+### Phase 4: Integration
+
+#### Added
+- **CLI Interface** (`cmd/bot/main.go`)
+  - `quant-bot version` - Show version, build time, git commit
+  - `quant-bot help` - Show usage and available commands
+  - `quant-bot validate --config <path>` - Validate config file
+  - `quant-bot backtest --config <path> --data <csv> --strategy <name>` - Run backtest
+  - `quant-bot run --config <path> --paper` - Start trading bot
+
+- **Main Loop Integration**
+  - Config loading from YAML with env var expansion
+  - Risk engine initialization
+  - Graceful shutdown with timeout
+  - Step-by-step shutdown (stop loop → cancel orders → save state → close connections)
+
+- **Build System Updates**
+  - `make build` now injects version, build time, git commit via ldflags
+  - Updated `make backtest` to use new CLI syntax
+
+#### Technical Details
+- CLI uses standard `flag` package (no external dependencies)
+- Graceful shutdown handles SIGINT/SIGTERM
+- JSON logging for `run` command, text logging for `backtest`
+- Backtest command prints results and performance metrics
+
+---
+
 ## [Unreleased]
 
-### Planned for 0.4.0 (Phase 4: Integration)
-- [ ] CLI interface với commands
-- [ ] Main loop integration
-- [ ] Graceful shutdown handling
-- [ ] Configuration loading from file
+### Planned for 0.5.0 (Phase 5: Persistence)
+- [ ] SQLite state persistence
+- [ ] Recovery on startup
+- [ ] Trade history storage
 
 ### Planned for 1.0.0 (Production Ready)
 - [ ] Live broker integration
