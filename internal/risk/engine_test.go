@@ -452,3 +452,203 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("RiskPerTradePct = %s, want 0.01", cfg.RiskPerTradePct)
 	}
 }
+
+// TestEngine_KillSwitch_ExactThreshold tests exact 20% threshold (KS-01).
+func TestEngine_KillSwitch_ExactThreshold(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxGlobalDrawdownPct = decimal.RequireFromString("0.20")
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	// Exact 20% drawdown: 10000 -> 8000
+	engine.UpdateEquity(decimal.RequireFromString("8000"))
+
+	// Should trigger at exactly 20%
+	if !engine.IsInSafeMode() {
+		t.Error("expected safe mode at exact 20% threshold (KS-01)")
+	}
+}
+
+// TestEngine_KillSwitch_JustBelow tests just below threshold doesn't trigger.
+func TestEngine_KillSwitch_JustBelow(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxGlobalDrawdownPct = decimal.RequireFromString("0.20")
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	// 19.99% drawdown: 10000 -> 8001
+	engine.UpdateEquity(decimal.RequireFromString("8001"))
+
+	// Should NOT trigger just below
+	if engine.IsInSafeMode() {
+		t.Error("should not trigger safe mode below 20% threshold")
+	}
+}
+
+// TestEngine_KillSwitch_Recovery tests no auto-reset after recovery (KS-03).
+func TestEngine_KillSwitch_NoAutoReset(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxGlobalDrawdownPct = decimal.RequireFromString("0.20")
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	// Trigger safe mode with 25% drawdown
+	engine.UpdateEquity(decimal.RequireFromString("7500"))
+
+	if !engine.IsInSafeMode() {
+		t.Fatal("expected safe mode to be triggered")
+	}
+
+	// Recover to 15% drawdown
+	engine.UpdateEquity(decimal.RequireFromString("8500"))
+
+	// KS-03: Should still be in safe mode (no auto-reset)
+	if !engine.IsInSafeMode() {
+		t.Error("expected safe mode to remain ON after recovery (KS-03)")
+	}
+}
+
+// TestEngine_KillSwitch_ExtremeGap tests 50% gap handling (KS-06).
+func TestEngine_KillSwitch_ExtremeGap(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxGlobalDrawdownPct = decimal.RequireFromString("0.20")
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	// 50% gap in one bar: 10000 -> 5000
+	engine.UpdateEquity(decimal.RequireFromString("5000"))
+
+	// Should trigger immediately
+	if !engine.IsInSafeMode() {
+		t.Error("expected safe mode on 50% gap (KS-06)")
+	}
+}
+
+// TestEngine_CurrentEquity tests current equity retrieval.
+func TestEngine_CurrentEquity(t *testing.T) {
+	cfg := DefaultConfig()
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	equity := engine.CurrentEquity()
+	expected := decimal.RequireFromString("10000")
+	if !equity.Equal(expected) {
+		t.Errorf("CurrentEquity = %s, want %s", equity, expected)
+	}
+
+	engine.UpdateEquity(decimal.RequireFromString("12000"))
+	equity = engine.CurrentEquity()
+	expected = decimal.RequireFromString("12000")
+	if !equity.Equal(expected) {
+		t.Errorf("CurrentEquity = %s, want %s", equity, expected)
+	}
+}
+
+// TestEngine_HighWaterMark tests HWM retrieval.
+func TestEngine_HighWaterMark(t *testing.T) {
+	cfg := DefaultConfig()
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	hwm := engine.HighWaterMark()
+	expected := decimal.RequireFromString("10000")
+	if !hwm.Equal(expected) {
+		t.Errorf("HighWaterMark = %s, want %s", hwm, expected)
+	}
+
+	// Go up
+	engine.UpdateEquity(decimal.RequireFromString("12000"))
+	hwm = engine.HighWaterMark()
+	expected = decimal.RequireFromString("12000")
+	if !hwm.Equal(expected) {
+		t.Errorf("HighWaterMark = %s, want %s", hwm, expected)
+	}
+
+	// Go down - HWM should stay
+	engine.UpdateEquity(decimal.RequireFromString("11000"))
+	hwm = engine.HighWaterMark()
+	expected = decimal.RequireFromString("12000")
+	if !hwm.Equal(expected) {
+		t.Errorf("HighWaterMark should not decrease: got %s, want %s", hwm, expected)
+	}
+}
+
+// TestEngine_GetSnapshot_ThreadSafe tests snapshot retrieval is consistent.
+func TestEngine_GetSnapshot_ThreadSafe(t *testing.T) {
+	cfg := DefaultConfig()
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	snapshot := engine.GetSnapshot()
+
+	// Snapshot should have consistent values
+	if snapshot.Equity.IsZero() {
+		t.Error("snapshot equity should not be zero")
+	}
+
+	if snapshot.HighWaterMark.LessThan(snapshot.Equity) {
+		t.Error("HWM should be >= equity")
+	}
+
+	// Drawdown should be non-negative
+	if snapshot.Drawdown.LessThan(decimal.Zero) {
+		t.Error("drawdown should not be negative")
+	}
+}
+
+// TestEngine_ValidateAndSize_StopDirectionLong tests stop direction for long (SL-01).
+func TestEngine_ValidateAndSize_StopDirectionLong(t *testing.T) {
+	cfg := DefaultConfig()
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	signal := types.Signal{
+		ID:        "sig-stop-long",
+		Symbol:    "MES",
+		Direction: types.SideLong,
+		StopTicks: 10,
+	}
+
+	marketEvent := types.MarketEvent{
+		Symbol: "MES",
+		Close:  decimal.RequireFromString("5000"),
+		ATR:    decimal.RequireFromString("2.5"),
+	}
+
+	intent, err := engine.ValidateAndSize(context.Background(), signal, marketEvent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// SL-01: LONG: stop < entry < tp
+	if intent.StopLoss.GreaterThanOrEqual(intent.EntryPrice) {
+		t.Errorf("LONG stop (%s) should be < entry (%s)", intent.StopLoss, intent.EntryPrice)
+	}
+	if intent.TakeProfit.LessThanOrEqual(intent.EntryPrice) {
+		t.Errorf("LONG tp (%s) should be > entry (%s)", intent.TakeProfit, intent.EntryPrice)
+	}
+}
+
+// TestEngine_ValidateAndSize_StopDirectionShort tests stop direction for short (SL-02).
+func TestEngine_ValidateAndSize_StopDirectionShort(t *testing.T) {
+	cfg := DefaultConfig()
+	engine := NewEngine(cfg, decimal.RequireFromString("10000"), nil)
+
+	signal := types.Signal{
+		ID:        "sig-stop-short",
+		Symbol:    "MES",
+		Direction: types.SideShort,
+		StopTicks: 10,
+	}
+
+	marketEvent := types.MarketEvent{
+		Symbol: "MES",
+		Close:  decimal.RequireFromString("5000"),
+		ATR:    decimal.RequireFromString("2.5"),
+	}
+
+	intent, err := engine.ValidateAndSize(context.Background(), signal, marketEvent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// SL-02: SHORT: stop > entry > tp
+	if intent.StopLoss.LessThanOrEqual(intent.EntryPrice) {
+		t.Errorf("SHORT stop (%s) should be > entry (%s)", intent.StopLoss, intent.EntryPrice)
+	}
+	if intent.TakeProfit.GreaterThanOrEqual(intent.EntryPrice) {
+		t.Errorf("SHORT tp (%s) should be < entry (%s)", intent.TakeProfit, intent.EntryPrice)
+	}
+}

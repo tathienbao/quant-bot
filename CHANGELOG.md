@@ -323,7 +323,23 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Added (In Progress)
+- **Test Coverage Expansion**
+  - Engine tests: 17 tests (Start, Stop, ProcessMarketEvent, KillSwitch)
+  - IBKR mock tests: 21 tests (Connect, Disconnect, PlaceOrder - mocked)
+  - Observer tests: 28 tests (Feed, Calculator, BacktestFeed, CSV parsing)
+  - Risk engine enhancements: +10 tests (KS-01 to KS-06, SL-01, SL-02)
+  - Types & Decimal tests: 9 tests (DEC-01 to DEC-03, InstrumentSpec)
+
 ### Planned for 1.0.0 (Production Ready)
-- [ ] Full test coverage
-- [ ] Documentation
+- [ ] Execution tests enhancement (Gap handling, Partial fills)
+- [ ] Concurrency tests with `-race` flag
+- [ ] Fuzz testing for critical paths
+- [ ] IBKR live integration tests (requires TWS)
 - [ ] Production hardening
+
+### Future Roadmap
+- [ ] IBKR Integration Tests (BC-02: TWS restart, BC-03: Rate limiting)
+- [ ] Live trading validation with paper account
+- [ ] Contract rollover automation (ROLL-01 to ROLL-03)
+- [ ] Multi-instrument correlation checks (MULTI-01 to MULTI-03)
