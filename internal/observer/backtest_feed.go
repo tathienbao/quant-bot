@@ -240,13 +240,15 @@ func NewMemoryFeed(events []types.MarketEvent, symbol string) *MemoryFeed {
 }
 
 // Subscribe starts sending events from memory.
+// If symbol is empty, all events are returned.
 func (f *MemoryFeed) Subscribe(ctx context.Context, symbol string) (<-chan types.MarketEvent, error) {
 	ch := make(chan types.MarketEvent, len(f.events))
 
 	go func() {
 		defer close(ch)
 		for _, event := range f.events {
-			if event.Symbol != symbol && f.symbol != symbol {
+			// If symbol filter is not empty, check it
+			if symbol != "" && event.Symbol != symbol && f.symbol != symbol {
 				continue
 			}
 			// Override symbol if feed has a fixed symbol

@@ -79,13 +79,58 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.3.0] - 2024-12-31
+
+### Phase 3: Execution & Backtest
+
+#### Added
+- **Execution** (`internal/execution/`)
+  - `Executor` interface: PlaceOrder, CancelOrder, GetPosition, GetOpenOrders, Shutdown
+  - `SimulatedExecutor`: Backtesting execution với:
+    - Slippage simulation (configurable ticks)
+    - Commission tracking
+    - Stop loss / Take profit handling
+    - Order idempotency via `usedOrderIDs` tracking
+    - Position management (open/close)
+    - Trade history recording
+
+- **Backtest Runner** (`internal/backtest/`)
+  - `Runner`: Main backtest engine với:
+    - Market data feed integration
+    - Strategy signal generation
+    - Risk engine validation
+    - Simulated execution
+    - Equity curve tracking per bar
+    - Time filtering (start/end time)
+  - `Result`: Comprehensive backtest results
+  - Time filtering support (StartTime, EndTime)
+
+- **Performance Metrics** (`internal/backtest/metrics.go`)
+  - `SharpeRatio`: Annualized risk-adjusted return
+  - `SortinoRatio`: Downside risk-adjusted return
+  - `CalmarRatio`: Return / Max Drawdown
+  - `MaxDrawdown`: Maximum peak-to-trough decline
+  - `WinRate`: Percentage of winning trades
+  - `ProfitFactor`: Gross profit / Gross loss
+  - `AverageWin`, `AverageLoss`: Mean trade P&L
+  - `Expectancy`: Expected value per trade
+  - `AnnualizedReturn`: Annualized total return
+
+#### Technical Details
+- SimulatedExecutor handles both opening and closing orders
+- Equity curve records point per market event
+- All metrics handle edge cases (no trades, empty curves)
+- Decimal precision maintained throughout calculations
+
+---
+
 ## [Unreleased]
 
-### Planned for 0.3.0 (Phase 3: Execution & Backtest)
-- [ ] SimulatedExecution
-- [ ] Backtest runner
-- [ ] Equity curve tracking
-- [ ] Performance metrics
+### Planned for 0.4.0 (Phase 4: Integration)
+- [ ] CLI interface với commands
+- [ ] Main loop integration
+- [ ] Graceful shutdown handling
+- [ ] Configuration loading from file
 
 ### Planned for 1.0.0 (Production Ready)
 - [ ] Live broker integration
