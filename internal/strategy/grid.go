@@ -11,25 +11,29 @@ import (
 // GridConfig holds configuration for the grid/rebound strategy.
 type GridConfig struct {
 	// Grid parameters
-	GridSpacingPct    decimal.Decimal // Distance between grid levels as % of price (e.g., 0.002 = 0.2%)
+	GridSpacingPoints decimal.Decimal // Distance between grid levels in points (e.g., 30 points)
 	ReboundPct        decimal.Decimal // Take profit when price rebounds this % (e.g., 0.15 = 15% of move)
 	MaxGridLevels     int             // Maximum number of open positions
 	LookbackBars      int             // Bars to look back for swing high/low
 
 	// Risk parameters
-	StopLossPct       decimal.Decimal // Stop loss as % of entry (e.g., 0.01 = 1%)
-	MinMovePoints     decimal.Decimal // Minimum price move to trigger grid entry
+	StopLossPoints decimal.Decimal // Stop loss in points
+	MinMovePoints  decimal.Decimal // Minimum price move to trigger grid entry
+
+	// Cooldown
+	CooldownBars int // Minimum bars between signals
 }
 
 // DefaultGridConfig returns sensible defaults for MES on M5/M15.
 func DefaultGridConfig() GridConfig {
 	return GridConfig{
-		GridSpacingPct:    decimal.RequireFromString("0.002"),  // 0.2% between levels
-		ReboundPct:        decimal.RequireFromString("0.15"),   // 15% rebound for TP
-		MaxGridLevels:     5,                                    // Max 5 positions
-		LookbackBars:      20,                                   // 20 bars for swing detection
-		StopLossPct:       decimal.RequireFromString("0.005"),  // 0.5% stop loss
-		MinMovePoints:     decimal.RequireFromString("10"),     // Min 10 points move
+		GridSpacingPoints: decimal.RequireFromString("25"),   // 25 points between levels
+		ReboundPct:        decimal.RequireFromString("0.20"), // 20% rebound for TP
+		MaxGridLevels:     3,                                  // Max 3 positions per direction
+		LookbackBars:      30,                                 // 30 bars (~2.5 hours on M5)
+		StopLossPoints:    decimal.RequireFromString("40"),   // 40 points stop loss
+		MinMovePoints:     decimal.RequireFromString("20"),   // Min 20 points move to enter
+		CooldownBars:      5,                                  // Wait 5 bars between signals
 	}
 }
 
@@ -50,22 +54,22 @@ type Grid struct {
 	lows  []decimal.Decimal
 
 	// Current grid state
-	swingHigh     decimal.Decimal
-	swingLow      decimal.Decimal
-	lastGridLevel int // Current grid level (0 = no position, 1-N = grid levels)
-	lastSignalBar int // Bar index of last signal (prevent rapid firing)
-	barCount      int
-
-	// Track active grid direction
-	gridDirection types.Side // LONG grid (buying dips) or SHORT grid (selling rallies)
+	swingHigh       decimal.Decimal
+	swingLow        decimal.Decimal
+	currentLevel    int        // Current grid level (0 = no position, 1-N = grid levels)
+	lastSignalBar   int        // Bar index of last signal (for cooldown)
+	barCount        int
+	gridDirection   types.Side // LONG grid (buying dips) or SHORT grid (selling rallies)
+	entryPrices     []decimal.Decimal // Track entry prices for each level
 }
 
 // NewGrid creates a new grid strategy.
 func NewGrid(cfg GridConfig) *Grid {
 	return &Grid{
-		cfg:   cfg,
-		highs: make([]decimal.Decimal, 0, cfg.LookbackBars),
-		lows:  make([]decimal.Decimal, 0, cfg.LookbackBars),
+		cfg:         cfg,
+		highs:       make([]decimal.Decimal, 0, cfg.LookbackBars),
+		lows:        make([]decimal.Decimal, 0, cfg.LookbackBars),
+		entryPrices: make([]decimal.Decimal, 0, cfg.MaxGridLevels),
 	}
 }
 
@@ -88,6 +92,11 @@ func (g *Grid) OnMarketEvent(ctx context.Context, event types.MarketEvent) []typ
 		return nil
 	}
 
+	// Check cooldown
+	if g.barCount-g.lastSignalBar < g.cfg.CooldownBars {
+		return nil
+	}
+
 	// Calculate swing high/low
 	g.swingHigh = g.calculateHigh(g.highs)
 	g.swingLow = g.calculateLow(g.lows)
@@ -98,92 +107,147 @@ func (g *Grid) OnMarketEvent(ctx context.Context, event types.MarketEvent) []typ
 		return nil // Range too small, no grid opportunity
 	}
 
-	// Calculate grid spacing in points
-	gridSpacing := event.Close.Mul(g.cfg.GridSpacingPct)
-
 	var signals []types.Signal
 
-	// Check for LONG grid opportunity (price dropped from high)
+	// Calculate distances from extremes
 	dropFromHigh := g.swingHigh.Sub(event.Close)
-	if dropFromHigh.GreaterThan(g.cfg.MinMovePoints) {
-		// Calculate which grid level we're at
-		gridLevel := int(dropFromHigh.Div(gridSpacing).IntPart()) + 1
+	riseFromLow := event.Close.Sub(g.swingLow)
 
-		// Only signal if we've moved to a new grid level
-		if gridLevel > g.lastGridLevel && gridLevel <= g.cfg.MaxGridLevels {
-			// Calculate take profit (rebound of 10-20% of the drop)
+	// Determine which direction to trade based on current position
+	// If no active grid, pick the side with larger move
+	if g.gridDirection == types.SideFlat {
+		if dropFromHigh.GreaterThan(riseFromLow) && dropFromHigh.GreaterThan(g.cfg.MinMovePoints) {
+			g.gridDirection = types.SideLong // Price dropped, look for longs
+		} else if riseFromLow.GreaterThan(g.cfg.MinMovePoints) {
+			g.gridDirection = types.SideShort // Price spiked, look for shorts
+		}
+	}
+
+	// Process LONG grid (buying dips)
+	if g.gridDirection == types.SideLong && dropFromHigh.GreaterThan(g.cfg.MinMovePoints) {
+		// Calculate which grid level we should be at
+		targetLevel := int(dropFromHigh.Div(g.cfg.GridSpacingPoints).IntPart()) + 1
+		if targetLevel > g.cfg.MaxGridLevels {
+			targetLevel = g.cfg.MaxGridLevels
+		}
+
+		// Only signal if we need to add a new level
+		if targetLevel > g.currentLevel {
+			// Calculate take profit (rebound of X% of the drop)
 			reboundTarget := dropFromHigh.Mul(g.cfg.ReboundPct)
 			tpPrice := event.Close.Add(reboundTarget)
 
 			// Calculate stop loss
-			stopDistance := event.Close.Mul(g.cfg.StopLossPct)
-			stopPrice := event.Close.Sub(stopDistance)
+			stopPrice := event.Close.Sub(g.cfg.StopLossPoints)
 
 			// Calculate stop in ticks
 			tickSize := getTickSize(event.Symbol)
-			stopTicks := int(stopDistance.Div(tickSize).Ceil().IntPart())
+			stopTicks := int(g.cfg.StopLossPoints.Div(tickSize).Ceil().IntPart())
 
 			signal := types.Signal{
-				ID:           fmt.Sprintf("grid-long-%d-%d", g.barCount, gridLevel),
+				ID:           fmt.Sprintf("grid-L%d-%d", targetLevel, g.barCount),
 				Timestamp:    event.Timestamp,
 				Symbol:       event.Symbol,
 				StrategyName: g.Name(),
 				Direction:    types.SideLong,
 				StopTicks:    stopTicks,
-				Strength:     decimal.NewFromFloat(float64(gridLevel) / float64(g.cfg.MaxGridLevels)),
-				Reason:       fmt.Sprintf("grid L%d: drop %.2f pts, TP %.2f, SL %.2f", gridLevel, dropFromHigh.InexactFloat64(), tpPrice.InexactFloat64(), stopPrice.InexactFloat64()),
+				Strength:     decimal.NewFromFloat(float64(targetLevel) / float64(g.cfg.MaxGridLevels)),
+				Reason:       fmt.Sprintf("L%d drop=%.1f TP=%.2f SL=%.2f", targetLevel, dropFromHigh.InexactFloat64(), tpPrice.InexactFloat64(), stopPrice.InexactFloat64()),
 			}
 			signals = append(signals, signal)
-			g.lastGridLevel = gridLevel
-			g.gridDirection = types.SideLong
+			g.currentLevel = targetLevel
+			g.lastSignalBar = g.barCount
+			g.entryPrices = append(g.entryPrices, event.Close)
+		}
+
+		// Check if price rebounded enough to reset grid
+		if g.currentLevel > 0 && len(g.entryPrices) > 0 {
+			avgEntry := g.calculateAvgEntry()
+			reboundFromEntry := event.Close.Sub(avgEntry)
+			targetRebound := g.swingHigh.Sub(avgEntry).Mul(g.cfg.ReboundPct)
+			if reboundFromEntry.GreaterThanOrEqual(targetRebound) {
+				g.resetGrid()
+			}
 		}
 	}
 
-	// Check for SHORT grid opportunity (price spiked from low)
-	riseFromLow := event.Close.Sub(g.swingLow)
-	if riseFromLow.GreaterThan(g.cfg.MinMovePoints) && g.gridDirection != types.SideLong {
-		// Calculate which grid level we're at
-		gridLevel := int(riseFromLow.Div(gridSpacing).IntPart()) + 1
+	// Process SHORT grid (selling rallies)
+	if g.gridDirection == types.SideShort && riseFromLow.GreaterThan(g.cfg.MinMovePoints) {
+		// Calculate which grid level we should be at
+		targetLevel := int(riseFromLow.Div(g.cfg.GridSpacingPoints).IntPart()) + 1
+		if targetLevel > g.cfg.MaxGridLevels {
+			targetLevel = g.cfg.MaxGridLevels
+		}
 
-		// Only signal if we've moved to a new grid level
-		if gridLevel > g.lastGridLevel && gridLevel <= g.cfg.MaxGridLevels {
-			// Calculate take profit (rebound of 10-20% of the rise)
+		// Only signal if we need to add a new level
+		if targetLevel > g.currentLevel {
+			// Calculate take profit (rebound of X% of the rise)
 			reboundTarget := riseFromLow.Mul(g.cfg.ReboundPct)
 			tpPrice := event.Close.Sub(reboundTarget)
 
 			// Calculate stop loss
-			stopDistance := event.Close.Mul(g.cfg.StopLossPct)
-			stopPrice := event.Close.Add(stopDistance)
+			stopPrice := event.Close.Add(g.cfg.StopLossPoints)
 
 			// Calculate stop in ticks
 			tickSize := getTickSize(event.Symbol)
-			stopTicks := int(stopDistance.Div(tickSize).Ceil().IntPart())
+			stopTicks := int(g.cfg.StopLossPoints.Div(tickSize).Ceil().IntPart())
 
 			signal := types.Signal{
-				ID:           fmt.Sprintf("grid-short-%d-%d", g.barCount, gridLevel),
+				ID:           fmt.Sprintf("grid-S%d-%d", targetLevel, g.barCount),
 				Timestamp:    event.Timestamp,
 				Symbol:       event.Symbol,
 				StrategyName: g.Name(),
 				Direction:    types.SideShort,
 				StopTicks:    stopTicks,
-				Strength:     decimal.NewFromFloat(float64(gridLevel) / float64(g.cfg.MaxGridLevels)),
-				Reason:       fmt.Sprintf("grid S%d: rise %.2f pts, TP %.2f, SL %.2f", gridLevel, riseFromLow.InexactFloat64(), tpPrice.InexactFloat64(), stopPrice.InexactFloat64()),
+				Strength:     decimal.NewFromFloat(float64(targetLevel) / float64(g.cfg.MaxGridLevels)),
+				Reason:       fmt.Sprintf("S%d rise=%.1f TP=%.2f SL=%.2f", targetLevel, riseFromLow.InexactFloat64(), tpPrice.InexactFloat64(), stopPrice.InexactFloat64()),
 			}
 			signals = append(signals, signal)
-			g.lastGridLevel = gridLevel
-			g.gridDirection = types.SideShort
+			g.currentLevel = targetLevel
+			g.lastSignalBar = g.barCount
+			g.entryPrices = append(g.entryPrices, event.Close)
+		}
+
+		// Check if price rebounded enough to reset grid
+		if g.currentLevel > 0 && len(g.entryPrices) > 0 {
+			avgEntry := g.calculateAvgEntry()
+			reboundFromEntry := avgEntry.Sub(event.Close)
+			targetRebound := avgEntry.Sub(g.swingLow).Mul(g.cfg.ReboundPct)
+			if reboundFromEntry.GreaterThanOrEqual(targetRebound) {
+				g.resetGrid()
+			}
 		}
 	}
 
-	// Reset grid when price returns to middle of range
-	midPoint := g.swingLow.Add(swingRange.Div(decimal.NewFromInt(2)))
-	distanceToMid := event.Close.Sub(midPoint).Abs()
-	if distanceToMid.LessThan(gridSpacing) {
-		g.lastGridLevel = 0
-		g.gridDirection = types.SideFlat
+	// Reset grid when price returns to middle of range (no active grid)
+	if g.currentLevel == 0 {
+		midPoint := g.swingLow.Add(swingRange.Div(decimal.NewFromInt(2)))
+		distanceToMid := event.Close.Sub(midPoint).Abs()
+		if distanceToMid.LessThan(g.cfg.GridSpacingPoints) {
+			g.gridDirection = types.SideFlat
+		}
 	}
 
 	return signals
+}
+
+// calculateAvgEntry returns the average entry price of current positions.
+func (g *Grid) calculateAvgEntry() decimal.Decimal {
+	if len(g.entryPrices) == 0 {
+		return decimal.Zero
+	}
+	sum := decimal.Zero
+	for _, p := range g.entryPrices {
+		sum = sum.Add(p)
+	}
+	return sum.Div(decimal.NewFromInt(int64(len(g.entryPrices))))
+}
+
+// resetGrid clears the current grid state.
+func (g *Grid) resetGrid() {
+	g.currentLevel = 0
+	g.gridDirection = types.SideFlat
+	g.entryPrices = g.entryPrices[:0]
 }
 
 // Name returns the strategy name.
@@ -197,10 +261,11 @@ func (g *Grid) Reset() {
 	g.lows = g.lows[:0]
 	g.swingHigh = decimal.Zero
 	g.swingLow = decimal.Zero
-	g.lastGridLevel = 0
+	g.currentLevel = 0
 	g.lastSignalBar = 0
 	g.barCount = 0
 	g.gridDirection = types.SideFlat
+	g.entryPrices = g.entryPrices[:0]
 }
 
 // calculateHigh returns the highest value in the slice.
