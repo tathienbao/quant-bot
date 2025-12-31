@@ -223,11 +223,42 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
-## [Unreleased]
+## [0.7.0] - 2024-12-31
 
-### Planned for 0.7.0 (Phase 7: Metrics)
-- [ ] Prometheus metrics (orders, equity, drawdown, latency)
-- [ ] Health check endpoint
+### Phase 7: Metrics
+
+#### Added
+- **Metrics Package** (`internal/metrics/`)
+  - `metrics.go` - Prometheus metrics definitions:
+    - Trading: orders_total, trades_total, positions_open, position_contracts
+    - Account: equity_current, equity_high_water_mark, drawdown_current, daily_pl, total_pl
+    - Risk: safe_mode_active, signals_generated_total, signals_rejected_total
+    - Latency: order_execution_seconds, data_feed_seconds, strategy_seconds
+    - System: heartbeat_timestamp, data_feed_connected, broker_connected, uptime_seconds_total, errors_total
+    - Build info metric with version, commit, build_time labels
+  - `server.go` - HTTP server for metrics and health:
+    - `/metrics` - Prometheus metrics endpoint
+    - `/health` - Detailed health status with registered checks
+    - `/ready` - Kubernetes readiness probe
+    - `/live` - Kubernetes liveness probe
+  - `recorder.go` - Helper methods for recording metrics
+    - Timer utility for latency measurement
+
+- **Integration**
+  - Metrics server initialization in main loop
+  - Health checks for risk engine and persistence
+  - Build info metric set on startup
+  - Graceful shutdown of metrics server
+
+#### Technical Details
+- Uses prometheus/client_golang for metrics
+- promauto for automatic registration
+- Health checks support healthy/unhealthy/degraded states
+- Configurable port and paths via config.yaml
+
+---
+
+## [Unreleased]
 
 ### Planned for 1.0.0 (Production Ready)
 - [ ] Live broker integration (IBKR, TradeStation)

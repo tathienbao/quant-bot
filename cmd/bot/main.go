@@ -16,6 +16,7 @@ import (
 	"github.com/tathienbao/quant-bot/internal/backtest"
 	"github.com/tathienbao/quant-bot/internal/config"
 	"github.com/tathienbao/quant-bot/internal/execution"
+	"github.com/tathienbao/quant-bot/internal/metrics"
 	"github.com/tathienbao/quant-bot/internal/observer"
 	"github.com/tathienbao/quant-bot/internal/persistence"
 	"github.com/tathienbao/quant-bot/internal/risk"
@@ -24,7 +25,7 @@ import (
 
 // Version information (set by build flags).
 var (
-	Version   = "0.6.0"
+	Version   = "0.7.0"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
@@ -293,6 +294,48 @@ func cmdRun(args []string) {
 		"risk_per_trade", cfg.Account.RiskPerTradePct,
 	)
 
+	// Initialize metrics server
+	var metricsServer *metrics.Server
+	if cfg.Metrics.Enabled {
+		metricsCfg := metrics.ServerConfig{
+			Port:        cfg.Metrics.Port,
+			MetricsPath: cfg.Metrics.Path,
+			HealthPath:  "/health",
+		}
+		metricsServer = metrics.NewServer(metricsCfg, logger)
+
+		// Register health checks
+		metricsServer.RegisterHealthCheck("risk_engine", func() metrics.Check {
+			if riskEngine.IsInSafeMode() {
+				return metrics.Check{Status: "degraded", Message: "safe mode active"}
+			}
+			return metrics.Check{Status: "healthy"}
+		})
+
+		metricsServer.RegisterHealthCheck("persistence", func() metrics.Check {
+			if repo == nil {
+				return metrics.Check{Status: "healthy", Message: "disabled"}
+			}
+			return metrics.Check{Status: "healthy"}
+		})
+
+		if err := metricsServer.Start(); err != nil {
+			slog.Error("failed to start metrics server", "err", err)
+		} else {
+			slog.Info("metrics server started",
+				"port", cfg.Metrics.Port,
+				"path", cfg.Metrics.Path,
+			)
+		}
+
+		// Set build info metric
+		metrics.SetBuildInfo(Version, GitCommit, BuildTime)
+
+		// Record initial equity
+		metrics.EquityCurrent.Set(cfg.Account.StartingEquity)
+		metrics.EquityHighWaterMark.Set(cfg.Account.StartingEquity)
+	}
+
 	// Send bot started alert
 	if cfg.Alerting.Enabled {
 		if err := alerter.Alert(ctx, alerting.SeverityInfo, "Bot started",
@@ -305,7 +348,7 @@ func cmdRun(args []string) {
 		}
 	}
 
-	// TODO: Phase 6+ implementations
+	// TODO: Phase 7+ implementations
 	// - Initialize broker connection
 	// - Start market data feed
 	// - Start trading loop
@@ -322,6 +365,13 @@ func cmdRun(args []string) {
 		cfg.ShutdownTimeout(),
 	)
 	defer cancel()
+
+	// Shutdown metrics server
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			slog.Error("metrics server shutdown error", "err", err)
+		}
+	}
 
 	// Perform shutdown tasks
 	if err := shutdownWithPersistence(shutdownCtx, cfg, repo, riskEngine, alerter); err != nil {
