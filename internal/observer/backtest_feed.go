@@ -46,7 +46,8 @@ func (f *BacktestFeed) Subscribe(ctx context.Context, symbol string) (<-chan typ
 	go func() {
 		defer close(ch)
 		for _, event := range f.events {
-			if event.Symbol != symbol {
+			// Empty symbol means match all, otherwise filter by symbol
+			if symbol != "" && event.Symbol != symbol {
 				continue
 			}
 			select {
