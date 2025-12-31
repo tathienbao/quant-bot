@@ -193,7 +193,11 @@ func (r *Runner) RunSymbol(ctx context.Context, symbol string) (*Result, error) 
 				trades := r.executor.GetTrades()
 				winRate := decimal.Zero
 				winCount := 0
+
+				// Calculate equity correctly from all trades
+				calculatedEquity := r.cfg.InitialEquity
 				for _, t := range trades {
+					calculatedEquity = calculatedEquity.Add(t.NetPL)
 					if t.NetPL.IsPositive() {
 						winCount++
 					}
@@ -206,7 +210,7 @@ func (r *Runner) RunSymbol(ctx context.Context, symbol string) (*Result, error) 
 					Bar:        r.barCount,
 					TotalBars:  r.totalBars,
 					Event:      event,
-					Equity:     currentEquity,
+					Equity:     calculatedEquity,
 					Trades:     len(trades),
 					WinRate:    winRate,
 					LastSignal: lastSignal,
