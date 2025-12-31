@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -25,11 +26,12 @@ import (
 	"github.com/tathienbao/quant-bot/internal/persistence"
 	"github.com/tathienbao/quant-bot/internal/risk"
 	"github.com/tathienbao/quant-bot/internal/strategy"
+	"github.com/tathienbao/quant-bot/internal/ui"
 )
 
 // Version information (set by build flags).
 var (
-	Version   = "1.3.0"
+	Version   = "1.4.0"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
@@ -221,6 +223,7 @@ func cmdBacktest(args []string) {
 	strategyName := fs.String("strategy", "", "Strategy (interactive if empty)")
 	verbose := fs.Bool("verbose", false, "Verbose output")
 	interactive := fs.Bool("i", false, "Force interactive mode")
+	showUI := fs.Bool("ui", true, "Show live chart UI (default: true)")
 	fs.Parse(args)
 
 	// Interactive mode for data file
@@ -233,10 +236,13 @@ func cmdBacktest(args []string) {
 		*strategyName = selectStrategy()
 	}
 
-	// Setup logging
+	// Setup logging - suppress if UI enabled
 	logLevel := slog.LevelInfo
 	if *verbose {
 		logLevel = slog.LevelDebug
+	}
+	if *showUI {
+		logLevel = slog.LevelError // Suppress logs when UI active
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: logLevel,
@@ -246,9 +252,12 @@ func cmdBacktest(args []string) {
 	// Load config
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		slog.Error("failed to load config", "err", err)
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Count total bars for progress
+	totalBars := countCSVLines(*dataPath)
 
 	// Create feed
 	feed := observer.NewBacktestFeed(*dataPath, cfg.Market.InstrumentPrimary)
@@ -280,7 +289,7 @@ func cmdBacktest(args []string) {
 	case "grid-conservative":
 		strat = strategy.NewGrid(strategy.ConservativeGridConfig())
 	default:
-		slog.Error("unknown strategy", "name", *strategyName)
+		fmt.Fprintf(os.Stderr, "unknown strategy: %s\n", *strategyName)
 		os.Exit(1)
 	}
 
@@ -299,19 +308,54 @@ func cmdBacktest(args []string) {
 		cfg.ToRiskConfig(),
 		execCfg,
 	)
+	runner.SetTotalBars(totalBars)
 
-	slog.Info("starting backtest",
-		"data", *dataPath,
-		"strategy", *strategyName,
-		"equity", cfg.Account.StartingEquity,
-	)
+	// Setup UI if enabled
+	var backtestUI *ui.BacktestUI
+	if *showUI {
+		backtestUI = ui.NewBacktestUI(totalBars, cfg.StartingEquityDecimal())
+		backtestUI.Start()
+		defer backtestUI.Stop()
+
+		// Set progress callback
+		lastRender := time.Now()
+		runner.SetProgressCallback(func(update backtest.ProgressUpdate) {
+			// Add candle
+			backtestUI.AddCandle(ui.Candle{
+				Open:  update.Event.Open,
+				High:  update.Event.High,
+				Low:   update.Event.Low,
+				Close: update.Event.Close,
+			})
+
+			// Update stats
+			backtestUI.UpdateStats(update.Equity, update.Trades, update.WinRate, update.LastSignal)
+
+			// Render at most 30 FPS
+			if time.Since(lastRender) > 33*time.Millisecond {
+				backtestUI.Render()
+				lastRender = time.Now()
+			}
+		})
+	} else {
+		slog.Info("starting backtest",
+			"data", *dataPath,
+			"strategy", *strategyName,
+			"equity", cfg.Account.StartingEquity,
+		)
+	}
 
 	// Run backtest
 	ctx := context.Background()
 	result, err := runner.Run(ctx)
 	if err != nil {
-		slog.Error("backtest failed", "err", err)
+		fmt.Fprintf(os.Stderr, "backtest failed: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Final render
+	if backtestUI != nil {
+		backtestUI.Render()
 	}
 
 	// Print results
@@ -320,6 +364,26 @@ func cmdBacktest(args []string) {
 	// Calculate metrics
 	metrics := backtest.NewMetrics(result, decimal.Zero)
 	printMetrics(metrics)
+}
+
+// countCSVLines counts the number of data lines in a CSV file
+func countCSVLines(path string) int {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	count := 0
+	for scanner.Scan() {
+		count++
+	}
+	// Subtract 1 for header
+	if count > 0 {
+		count--
+	}
+	return count
 }
 
 func printBacktestResults(result *backtest.Result, startingEquity float64) {

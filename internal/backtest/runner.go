@@ -14,6 +14,20 @@ import (
 	"github.com/tathienbao/quant-bot/internal/types"
 )
 
+// ProgressUpdate contains info for UI updates
+type ProgressUpdate struct {
+	Bar         int
+	TotalBars   int
+	Event       types.MarketEvent
+	Equity      decimal.Decimal
+	Trades      int
+	WinRate     decimal.Decimal
+	LastSignal  string
+}
+
+// ProgressCallback is called on each bar for UI updates
+type ProgressCallback func(update ProgressUpdate)
+
 // Config holds backtest configuration.
 type Config struct {
 	InitialEquity decimal.Decimal
@@ -55,6 +69,11 @@ type Runner struct {
 
 	equityCurve []EquityPoint
 	highWater   decimal.Decimal
+
+	// UI callback
+	progressCb ProgressCallback
+	barCount   int
+	totalBars  int
 }
 
 // NewRunner creates a new backtest runner.
@@ -81,6 +100,16 @@ func NewRunner(
 		equityCurve: make([]EquityPoint, 0),
 		highWater:   cfg.InitialEquity,
 	}
+}
+
+// SetProgressCallback sets a callback for UI updates
+func (r *Runner) SetProgressCallback(cb ProgressCallback) {
+	r.progressCb = cb
+}
+
+// SetTotalBars sets the expected total number of bars (for progress display)
+func (r *Runner) SetTotalBars(total int) {
+	r.totalBars = total
 }
 
 // Run executes the backtest.
@@ -117,6 +146,8 @@ func (r *Runner) RunSymbol(ctx context.Context, symbol string) (*Result, error) 
 				return r.calculateResults(), nil
 			}
 
+			r.barCount++
+
 			// Calculate indicators
 			if r.calculator != nil {
 				event = r.calculator.OnBar(event)
@@ -130,6 +161,7 @@ func (r *Runner) RunSymbol(ctx context.Context, symbol string) (*Result, error) 
 
 			// Generate signals from strategy
 			signals := r.strategy.OnMarketEvent(ctx, event)
+			var lastSignal string
 
 			// Process each signal through risk engine
 			for _, signal := range signals {
@@ -149,11 +181,37 @@ func (r *Runner) RunSymbol(ctx context.Context, symbol string) (*Result, error) 
 				if result.Status == types.OrderStatusFilled {
 					// For opening orders, no immediate PnL
 					// PnL realized on close via UpdateMarket
+					lastSignal = signal.Direction.String()
 				}
 			}
 
 			// Record equity point
 			r.recordEquity(event.Timestamp, currentEquity)
+
+			// Call progress callback for UI
+			if r.progressCb != nil {
+				trades := r.executor.GetTrades()
+				winRate := decimal.Zero
+				winCount := 0
+				for _, t := range trades {
+					if t.NetPL.IsPositive() {
+						winCount++
+					}
+				}
+				if len(trades) > 0 {
+					winRate = decimal.NewFromInt(int64(winCount)).Div(decimal.NewFromInt(int64(len(trades)))).Mul(decimal.NewFromInt(100))
+				}
+
+				r.progressCb(ProgressUpdate{
+					Bar:        r.barCount,
+					TotalBars:  r.totalBars,
+					Event:      event,
+					Equity:     currentEquity,
+					Trades:     len(trades),
+					WinRate:    winRate,
+					LastSignal: lastSignal,
+				})
+			}
 		}
 	}
 }
@@ -268,6 +326,7 @@ func (r *Runner) Reset() {
 	r.strategy.Reset()
 	r.equityCurve = make([]EquityPoint, 0)
 	r.highWater = r.cfg.InitialEquity
+	r.barCount = 0
 
 	// Reset risk engine to initial equity
 	r.riskEngine.UpdateEquity(r.cfg.InitialEquity)

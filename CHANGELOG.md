@@ -321,6 +321,37 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [1.4.0] - 2024-12-31
+
+### Live Candlestick Chart UI
+
+#### Added
+- **Terminal UI** (`internal/ui/`)
+  - Real-time candlestick chart in terminal during backtest
+  - Price axis with auto-scaling
+  - Green/red candles for up/down bars
+  - Progress bar showing backtest completion
+  - Live stats: Equity, P&L%, Trades, Win Rate, Last Signal
+  - Scrolling chart (old candles exit left, new enter right)
+
+- **Backtest Progress Callback**
+  - `SetProgressCallback()` for UI updates
+  - `SetTotalBars()` for progress tracking
+  - Real-time equity and trade updates
+
+#### Changed
+- Backtest now shows live chart by default (`--ui=true`)
+- Use `--ui=false` to disable and see log output
+- Logs suppressed when UI active for clean display
+
+#### Technical Details
+- Uses ANSI escape codes for terminal rendering
+- Unicode block characters for candles (`█▄▀│`)
+- Renders at 30 FPS max for smooth updates
+- Auto-detects terminal size
+
+---
+
 ## [1.3.0] - 2024-12-31
 
 ### Interactive CLI & Grid Strategy
