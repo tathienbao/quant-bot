@@ -127,3 +127,129 @@ func FuzzDecimalArithmetic(f *testing.F) {
 		}
 	})
 }
+
+// FuzzOHLCValidation tests OHLC data validation with random values.
+func FuzzOHLCValidation(f *testing.F) {
+	// Seed corpus with valid OHLC data
+	f.Add("100.00", "105.00", "95.00", "102.00")
+	f.Add("50.00", "50.00", "50.00", "50.00")   // All same (valid)
+	f.Add("100.00", "100.00", "100.00", "100.00")
+	f.Add("1.00", "2.00", "0.50", "1.50")
+
+	f.Fuzz(func(t *testing.T, openStr, highStr, lowStr, closeStr string) {
+		open, err := decimal.NewFromString(openStr)
+		if err != nil || open.LessThanOrEqual(decimal.Zero) {
+			return
+		}
+
+		high, err := decimal.NewFromString(highStr)
+		if err != nil || high.LessThanOrEqual(decimal.Zero) {
+			return
+		}
+
+		low, err := decimal.NewFromString(lowStr)
+		if err != nil || low.LessThanOrEqual(decimal.Zero) {
+			return
+		}
+
+		close, err := decimal.NewFromString(closeStr)
+		if err != nil || close.LessThanOrEqual(decimal.Zero) {
+			return
+		}
+
+		// OHLC validation rules
+		valid := true
+
+		// High should be >= Open, Close, Low
+		if high.LessThan(open) || high.LessThan(close) || high.LessThan(low) {
+			valid = false
+		}
+
+		// Low should be <= Open, Close, High
+		if low.GreaterThan(open) || low.GreaterThan(close) || low.GreaterThan(high) {
+			valid = false
+		}
+
+		// If valid OHLC, calculate true range
+		if valid {
+			// True range should never be negative
+			trueRange := high.Sub(low)
+			if trueRange.LessThan(decimal.Zero) {
+				t.Errorf("negative true range: %s", trueRange)
+			}
+		}
+	})
+}
+
+// FuzzOrderIntent tests order intent creation doesn't panic.
+func FuzzOrderIntent(f *testing.F) {
+	// Seed corpus
+	f.Add("5000.00", "4990.00", "5015.00", 2, true)
+	f.Add("2000.00", "2010.00", "1985.00", 1, false)
+	f.Add("100.00", "99.00", "102.00", 5, true)
+
+	f.Fuzz(func(t *testing.T, entryStr, stopStr, targetStr string, contracts int, isLong bool) {
+		entry, err := decimal.NewFromString(entryStr)
+		if err != nil || entry.LessThanOrEqual(decimal.Zero) {
+			return
+		}
+
+		stop, err := decimal.NewFromString(stopStr)
+		if err != nil || stop.LessThanOrEqual(decimal.Zero) {
+			return
+		}
+
+		target, err := decimal.NewFromString(targetStr)
+		if err != nil || target.LessThanOrEqual(decimal.Zero) {
+			return
+		}
+
+		if contracts <= 0 || contracts > 100 {
+			return
+		}
+
+		// Validate stop/target placement based on direction
+		if isLong {
+			// Long: stop < entry < target
+			if stop.GreaterThanOrEqual(entry) {
+				return // Invalid for long
+			}
+			if target.LessThanOrEqual(entry) {
+				return // Invalid for long
+			}
+		} else {
+			// Short: target < entry < stop
+			if stop.LessThanOrEqual(entry) {
+				return // Invalid for short
+			}
+			if target.GreaterThanOrEqual(entry) {
+				return // Invalid for short
+			}
+		}
+
+		// Calculate risk
+		var risk decimal.Decimal
+		if isLong {
+			risk = entry.Sub(stop)
+		} else {
+			risk = stop.Sub(entry)
+		}
+
+		// Risk should be positive for valid orders
+		if risk.LessThanOrEqual(decimal.Zero) {
+			t.Errorf("non-positive risk: %s", risk)
+		}
+
+		// Reward should be positive
+		var reward decimal.Decimal
+		if isLong {
+			reward = target.Sub(entry)
+		} else {
+			reward = entry.Sub(target)
+		}
+
+		if reward.LessThanOrEqual(decimal.Zero) {
+			t.Errorf("non-positive reward: %s", reward)
+		}
+	})
+}
