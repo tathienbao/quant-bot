@@ -4,6 +4,18 @@ File này định nghĩa **mindset** và **phong cách code** mà Claude cần t
 
 ---
 
+## 0. Privacy Rules (CRITICAL)
+
+**KHÔNG BAO GIỜ** để lộ việc sử dụng AI trong codebase:
+- ❌ KHÔNG thêm "Generated with Claude Code" vào commit messages
+- ❌ KHÔNG thêm "Co-Authored-By: Claude"
+- ❌ KHÔNG mention AI/LLM/Claude trong code comments
+- ❌ KHÔNG tạo file ghi nhận AI contribution
+
+Commit messages phải viết như developer bình thường, ngắn gọn và professional.
+
+---
+
 ## 1. Mindset tổng quát
 
 1. **Risk-first, không phải profit-first**
