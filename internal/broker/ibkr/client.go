@@ -1,17 +1,30 @@
 package ibkr
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/tathienbao/quant-bot/internal/broker"
 	"github.com/tathienbao/quant-bot/internal/types"
 	"golang.org/x/time/rate"
+)
+
+// IB API message IDs.
+const (
+	msgTickPrice        = 1
+	msgTickSize         = 2
+	msgAccountSummary   = 63
+	msgAccountSummaryEnd = 64
+	msgPosition         = 61
+	msgPositionEnd      = 62
 )
 
 // Client implements the broker.Broker interface for IBKR.
@@ -31,7 +44,6 @@ type Client struct {
 
 	// Request tracking
 	nextReqID atomic.Int64
-	reqMu     sync.Mutex
 	requests  map[int64]chan any
 
 	// Market data subscriptions
@@ -122,7 +134,7 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	// Perform IB API handshake
 	if err := c.handshake(); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		c.state.Store(int32(broker.StateError))
 		c.lastError = err
 		return fmt.Errorf("handshake: %w", err)
@@ -163,9 +175,9 @@ func (c *Client) handshake() error {
 
 	// Read server response
 	buf := make([]byte, 1024)
-	c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	n, err := c.conn.Read(buf)
-	c.conn.SetReadDeadline(time.Time{})
+	_ = c.conn.SetReadDeadline(time.Time{})
 
 	if err != nil {
 		return fmt.Errorf("read handshake response: %w", err)
@@ -211,7 +223,7 @@ func (c *Client) readLoop() {
 		default:
 		}
 
-		c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_ = c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		n, err := c.conn.Read(buf)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -230,9 +242,160 @@ func (c *Client) readLoop() {
 
 // processMessage processes an incoming message.
 func (c *Client) processMessage(data []byte) {
-	// Parse IB API message
-	// This is simplified - real implementation needs full message parsing
-	c.logger.Debug("received message", "size", len(data))
+	// Parse IB API message - fields separated by null bytes
+	fields := bytes.Split(data, []byte{0})
+	if len(fields) < 2 {
+		c.logger.Debug("received incomplete message", "size", len(data))
+		return
+	}
+
+	// First field is message ID
+	msgID, err := strconv.Atoi(string(fields[0]))
+	if err != nil {
+		c.logger.Debug("invalid message ID", "data", string(fields[0]))
+		return
+	}
+
+	c.logger.Debug("received message", "msg_id", msgID, "fields", len(fields))
+
+	switch msgID {
+	case msgTickPrice:
+		c.handleTickPrice(fields)
+	case msgTickSize:
+		c.handleTickSize(fields)
+	case msgAccountSummary:
+		c.handleAccountSummary(fields)
+	case msgPosition:
+		c.handlePosition(fields)
+	default:
+		c.logger.Debug("unhandled message type", "msg_id", msgID)
+	}
+}
+
+// handleTickPrice handles tick price messages.
+func (c *Client) handleTickPrice(fields [][]byte) {
+	// Format: msgID, version, tickerID, tickType, price, size, attribs
+	if len(fields) < 5 {
+		return
+	}
+
+	tickerID, _ := strconv.ParseInt(string(fields[2]), 10, 64)
+	tickType, _ := strconv.Atoi(string(fields[3]))
+	priceStr := string(fields[4])
+
+	price, err := decimal.NewFromString(priceStr)
+	if err != nil {
+		return
+	}
+
+	// tickType: 1=bid, 2=ask, 4=last, 6=high, 7=low, 9=close
+	event := types.MarketEvent{
+		Timestamp: time.Now(),
+	}
+
+	switch tickType {
+	case 4: // Last price
+		event.Close = price
+	case 6: // High
+		event.High = price
+	case 7: // Low
+		event.Low = price
+	default:
+		return
+	}
+
+	c.publishMarketData(tickerID, event)
+}
+
+// handleTickSize handles tick size messages.
+func (c *Client) handleTickSize(fields [][]byte) {
+	// Format: msgID, version, tickerID, tickType, size
+	if len(fields) < 5 {
+		return
+	}
+
+	tickerID, _ := strconv.ParseInt(string(fields[2]), 10, 64)
+	tickType, _ := strconv.Atoi(string(fields[3]))
+	size, _ := strconv.ParseInt(string(fields[4]), 10, 64)
+
+	// tickType: 0=bid size, 3=ask size, 5=last size, 8=volume
+	if tickType == 8 { // Volume
+		event := types.MarketEvent{
+			Timestamp: time.Now(),
+			Volume:    size,
+		}
+		c.publishMarketData(tickerID, event)
+	}
+}
+
+// handleAccountSummary handles account summary messages.
+func (c *Client) handleAccountSummary(fields [][]byte) {
+	// Format: msgID, version, reqID, account, tag, value, currency
+	if len(fields) < 7 {
+		return
+	}
+
+	tag := string(fields[4])
+	valueStr := string(fields[5])
+
+	value, err := decimal.NewFromString(valueStr)
+	if err != nil {
+		return
+	}
+
+	c.accountMu.Lock()
+	if c.account == nil {
+		c.account = &broker.AccountSummary{
+			AccountID:   string(fields[3]),
+			Currency:    string(fields[6]),
+			LastUpdated: time.Now(),
+		}
+	}
+
+	switch tag {
+	case "NetLiquidation":
+		c.account.NetLiquidation = value
+	case "TotalCashValue":
+		c.account.TotalCashValue = value
+	case "BuyingPower":
+		c.account.BuyingPower = value
+	case "AvailableFunds":
+		c.account.AvailableFunds = value
+	}
+	c.account.LastUpdated = time.Now()
+	c.accountMu.Unlock()
+
+	c.logger.Debug("account summary updated", "tag", tag, "value", value)
+}
+
+// handlePosition handles position messages.
+func (c *Client) handlePosition(fields [][]byte) {
+	// Format: msgID, version, account, conId, symbol, secType, expiry, strike, right, multiplier, exchange, currency, localSymbol, tradingClass, position, avgCost
+	if len(fields) < 15 {
+		return
+	}
+
+	symbol := string(fields[4])
+	contracts, _ := strconv.Atoi(string(fields[14]))
+	avgCostStr := string(fields[15])
+	avgCost, _ := decimal.NewFromString(avgCostStr)
+
+	side := types.SideLong
+	if contracts < 0 {
+		side = types.SideShort
+		contracts = -contracts
+	}
+
+	pos := &broker.Position{
+		Symbol:      symbol,
+		Contracts:   contracts,
+		Side:        side,
+		AvgCost:     avgCost,
+		LastUpdated: time.Now(),
+	}
+
+	c.updatePosition(pos)
+	c.logger.Debug("position updated", "symbol", symbol, "contracts", contracts, "side", side)
 }
 
 // handleDisconnect handles connection loss.
@@ -344,7 +507,7 @@ func (c *Client) Disconnect() error {
 	close(c.done)
 
 	if c.conn != nil {
-		c.conn.Close()
+		_ = c.conn.Close()
 	}
 
 	c.wg.Wait()
@@ -631,7 +794,7 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	c.mdMu.Lock()
 	for symbol := range c.mdSubscriptions {
 		c.mdMu.Unlock()
-		c.UnsubscribeMarketData(symbol)
+		_ = c.UnsubscribeMarketData(symbol)
 		c.mdMu.Lock()
 	}
 	c.mdMu.Unlock()

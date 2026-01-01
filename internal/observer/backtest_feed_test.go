@@ -292,6 +292,7 @@ func TestBacktestFeed_Subscribe_ContextCancelled(t *testing.T) {
 	feed := NewBacktestFeed(tmpFile, "MES")
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	ch, err := feed.Subscribe(ctx, "MES")
 	if err != nil {

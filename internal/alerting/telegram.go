@@ -86,7 +86,7 @@ func (t *TelegramAlerter) Alert(ctx context.Context, severity Severity, message 
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response
 	respBody, err := io.ReadAll(resp.Body)
@@ -152,7 +152,7 @@ func (t *TelegramAlerter) SendDailySummary(ctx context.Context, summary DailySum
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

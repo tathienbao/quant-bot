@@ -49,8 +49,7 @@ type BacktestUI struct {
 	lastSignal  string
 
 	// Terminal
-	width  int
-	height int
+	width int
 }
 
 // NewBacktestUI creates a new backtest UI

@@ -113,10 +113,12 @@ func (e *Engine) Start(ctx context.Context) error {
 
 	// Send start alert
 	if e.alerter != nil {
-		e.alerter.Alert(ctx, alerting.SeverityInfo, "Trading engine started",
+		if err := e.alerter.Alert(ctx, alerting.SeverityInfo, "Trading engine started",
 			"symbol", e.cfg.Symbol,
 			"strategy", e.strategy.Name(),
-		)
+		); err != nil {
+			e.logger.Warn("failed to send start alert", "err", err)
+		}
 	}
 
 	return nil
@@ -221,11 +223,13 @@ func (e *Engine) processSignal(ctx context.Context, signal types.Signal, event t
 
 		// Alert on order rejection
 		if e.alerter != nil {
-			e.alerter.Alert(ctx, alerting.SeverityWarning, "Order rejected",
+			if alertErr := e.alerter.Alert(ctx, alerting.SeverityWarning, "Order rejected",
 				"symbol", signal.Symbol,
 				"side", signal.Direction,
 				"error", err.Error(),
-			)
+			); alertErr != nil {
+				e.logger.Warn("failed to send order rejection alert", "err", alertErr)
+			}
 		}
 
 		return fmt.Errorf("place order: %w", err)
@@ -246,13 +250,15 @@ func (e *Engine) processSignal(ctx context.Context, signal types.Signal, event t
 
 	// Alert on order placement
 	if e.alerter != nil {
-		e.alerter.Alert(ctx, alerting.SeverityInfo, "Order placed",
+		if err := e.alerter.Alert(ctx, alerting.SeverityInfo, "Order placed",
 			"order_id", result.OrderID,
 			"symbol", orderIntent.Symbol,
 			"side", orderIntent.Side.String(),
 			"contracts", orderIntent.Contracts,
 			"entry", orderIntent.EntryPrice.StringFixed(2),
-		)
+		); err != nil {
+			e.logger.Warn("failed to send order placement alert", "err", err)
+		}
 	}
 
 	return nil
@@ -306,11 +312,13 @@ func (e *Engine) handleKillSwitch(ctx context.Context) {
 	// Alert
 	if e.alerter != nil {
 		snapshot := e.riskEngine.GetSnapshot()
-		e.alerter.Alert(ctx, alerting.SeverityCritical, "KILL SWITCH ACTIVATED",
+		if err := e.alerter.Alert(ctx, alerting.SeverityCritical, "KILL SWITCH ACTIVATED",
 			"equity", snapshot.Equity.StringFixed(2),
 			"high_water", snapshot.HighWaterMark.StringFixed(2),
 			"drawdown", snapshot.Drawdown.Mul(decimal.NewFromInt(100)).StringFixed(2)+"%",
-		)
+		); err != nil {
+			e.logger.Error("failed to send kill switch alert", "err", err)
+		}
 	}
 
 	// Cancel all open orders
@@ -357,7 +365,9 @@ func (e *Engine) Stop(ctx context.Context) error {
 
 	// Alert
 	if e.alerter != nil {
-		e.alerter.Alert(ctx, alerting.SeverityInfo, "Trading engine stopped")
+		if err := e.alerter.Alert(ctx, alerting.SeverityInfo, "Trading engine stopped"); err != nil {
+			e.logger.Warn("failed to send stop alert", "err", err)
+		}
 	}
 
 	e.logger.Info("trading engine stopped")

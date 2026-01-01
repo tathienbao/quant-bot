@@ -147,7 +147,7 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	if overallStatus != "healthy" {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // readyHandler handles the /ready endpoint (Kubernetes readiness probe).
@@ -160,19 +160,19 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 		check := checker()
 		if check.Status != "healthy" {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("not ready"))
+			_, _ = w.Write([]byte("not ready"))
 			return
 		}
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ready"))
+	_, _ = w.Write([]byte("ready"))
 }
 
 // liveHandler handles the /live endpoint (Kubernetes liveness probe).
 func (s *Server) liveHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("alive"))
+	_, _ = w.Write([]byte("alive"))
 }
 
 // Uptime returns the server uptime.

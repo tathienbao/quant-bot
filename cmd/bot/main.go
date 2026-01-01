@@ -201,7 +201,7 @@ func cmdVersion() {
 func cmdValidate(args []string) {
 	fs := flag.NewFlagSet("validate", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "Path to configuration file")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError handles parse errors
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -224,7 +224,7 @@ func cmdBacktest(args []string) {
 	verbose := fs.Bool("verbose", false, "Verbose output")
 	interactive := fs.Bool("i", false, "Force interactive mode")
 	showUI := fs.Bool("ui", true, "Show live chart UI (default: true)")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError handles parse errors
 
 	// Interactive mode for data file
 	if *dataPath == "" || *interactive {
@@ -378,7 +378,7 @@ func countCSVLines(path string) int {
 	if err != nil {
 		return 0
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	count := 0
@@ -424,7 +424,7 @@ func cmdRun(args []string) {
 	strategyName := fs.String("strategy", "", "Strategy (interactive if empty)")
 	barDelay := fs.Duration("bar-delay", 100*time.Millisecond, "Delay between bars in simulation")
 	interactive := fs.Bool("i", false, "Force interactive mode")
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError handles parse errors
 
 	// Interactive mode for strategy
 	if *strategyName == "" || *interactive {
@@ -474,7 +474,7 @@ func cmdRun(args []string) {
 			slog.Error("failed to initialize persistence", "err", err)
 			os.Exit(1)
 		}
-		defer repo.Close()
+		defer func() { _ = repo.Close() }()
 
 		slog.Info("persistence initialized", "path", cfg.Persistence.Path)
 

@@ -140,6 +140,7 @@ func TestObserver_Subscribe_ContextCancelled(t *testing.T) {
 	obs := NewObserver(feed, calc)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	ch, err := obs.Subscribe(ctx, "MES")
 	if err != nil {

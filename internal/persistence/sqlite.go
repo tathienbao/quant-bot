@@ -198,7 +198,7 @@ func (r *SQLiteRepository) GetEquityHistory(ctx context.Context, from, to time.T
 	if err != nil {
 		return nil, fmt.Errorf("query equity history: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var snapshots []EquitySnapshot
 	for rows.Next() {
@@ -254,7 +254,7 @@ func (r *SQLiteRepository) GetOpenPositions(ctx context.Context) ([]types.Positi
 	if err != nil {
 		return nil, fmt.Errorf("query positions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var positions []types.Position
 	for rows.Next() {
@@ -327,7 +327,7 @@ func (r *SQLiteRepository) GetTrades(ctx context.Context, from, to time.Time) ([
 	if err != nil {
 		return nil, fmt.Errorf("query trades: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return r.scanTrades(rows)
 }
@@ -341,7 +341,7 @@ func (r *SQLiteRepository) GetTradesBySymbol(ctx context.Context, symbol string,
 	if err != nil {
 		return nil, fmt.Errorf("query trades by symbol: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return r.scanTrades(rows)
 }
@@ -406,7 +406,7 @@ func (r *SQLiteRepository) GetPendingOrders(ctx context.Context) ([]OrderRecord,
 	if err != nil {
 		return nil, fmt.Errorf("query pending orders: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var orders []OrderRecord
 	for rows.Next() {

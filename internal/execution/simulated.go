@@ -85,7 +85,8 @@ func (s *SimulatedExecutor) UpdateMarket(event types.MarketEvent) []types.OrderR
 func (s *SimulatedExecutor) checkExits(event types.MarketEvent, pos *types.Position) []types.OrderResult {
 	var fills []types.OrderResult
 
-	if pos.Side == types.SideLong {
+	switch pos.Side {
+	case types.SideLong:
 		// Long position: stop below entry, TP above
 		if !pos.StopLoss.IsZero() && event.Low.LessThanOrEqual(pos.StopLoss) {
 			fill := s.closePosition(pos, pos.StopLoss, "stop_loss")
@@ -94,7 +95,7 @@ func (s *SimulatedExecutor) checkExits(event types.MarketEvent, pos *types.Posit
 			fill := s.closePosition(pos, pos.TakeProfit, "take_profit")
 			fills = append(fills, fill)
 		}
-	} else if pos.Side == types.SideShort {
+	case types.SideShort:
 		// Short position: stop above entry, TP below
 		if !pos.StopLoss.IsZero() && event.High.GreaterThanOrEqual(pos.StopLoss) {
 			fill := s.closePosition(pos, pos.StopLoss, "stop_loss")

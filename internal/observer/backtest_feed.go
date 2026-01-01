@@ -79,7 +79,7 @@ func (f *BacktestFeed) load() error {
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	events, err := ParseCSV(file, f.symbol)
 	if err != nil {
