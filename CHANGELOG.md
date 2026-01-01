@@ -321,6 +321,17 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [1.4.1] - 2025-01-01
+
+### Bug Fix
+
+#### Fixed
+- **Data Race in Paper Broker** (`internal/broker/paper/paper.go`)
+  - Fixed race condition in `SimulateMarketData()`: changed `RLock()` to `Lock()` when writing to `prices` map
+  - Tests now pass with `-race` flag
+
+---
+
 ## [1.4.0] - 2024-12-31
 
 ### Live Candlestick Chart UI

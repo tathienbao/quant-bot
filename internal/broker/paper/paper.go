@@ -186,8 +186,8 @@ func (b *Broker) UnsubscribeMarketData(symbol string) error {
 
 // SimulateMarketData simulates market data for testing.
 func (b *Broker) SimulateMarketData(event types.MarketEvent) {
-	b.mdMu.RLock()
-	defer b.mdMu.RUnlock()
+	b.mdMu.Lock()
+	defer b.mdMu.Unlock()
 
 	// Update price
 	b.prices[event.Symbol] = event.Close
