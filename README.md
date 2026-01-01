@@ -1,6 +1,6 @@
 # Quant Trading Bot – MES / MGC – Risk-First Architecture
 
-![Version](https://img.shields.io/badge/version-1.4.1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.4.2-blue?style=flat-square)
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Build](https://img.shields.io/github/actions/workflow/status/tathienbao/quant-bot/ci.yml?branch=main&style=flat-square)

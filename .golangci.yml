@@ -1,36 +1,25 @@
 # golangci-lint configuration (v2)
-# https://golangci-lint.run/usage/configuration/
-
 version: "2"
 
 run:
   timeout: 5m
-  tests: false  # Exclude test files from linting
+  tests: false
 
 linters:
   default: none
   enable:
-    # Core linters
-    - govet         # Vet examines Go source code
-    - ineffassign   # Detects unused variable assignments
-    - staticcheck   # Static analysis
-
-linters-settings:
-  govet:
-    disable:
-      - fieldalignment
-      - shadow
-
-  staticcheck:
-    checks:
-      - all
-      - "-SA1019"  # Deprecated
-      - "-QF1003"  # Tagged switch
-      - "-QF1007"  # Merge conditional
-
-issues:
-  exclude-dirs:
-    - vendor
-    - third_party
-    - testdata
-    - examples
+    - govet
+    - ineffassign
+    - staticcheck
+  settings:
+    govet:
+      disable:
+        - fieldalignment
+        - shadow
+    staticcheck:
+      checks:
+        - all
+        - "-SA1019"
+        - "-QF1003"
+        - "-QF1007"
+        - "-ST1000"

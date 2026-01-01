@@ -321,6 +321,22 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [1.4.2] - 2025-01-01
+
+### CI & Code Quality
+
+#### Fixed
+- **golangci-lint v2 Compatibility**
+  - Update config schema for golangci-lint v2
+  - Use golangci-lint-action@v7 with v2.0.2
+  - Implement IBKR message parsing (handleTickPrice, handleAccountSummary, etc.)
+  - Add error handling for alerter.Alert() calls
+  - Fix context leaks in test files
+  - Fix unchecked Close/Write calls
+  - Convert if-else to switch statement in simulated.go
+
+---
+
 ## [1.4.1] - 2025-01-01
 
 ### Bug Fix
