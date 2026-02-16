@@ -104,40 +104,40 @@ go test -fuzz=FuzzPositionSizer -fuzztime=30s ./internal/risk/
 
 ---
 
-## 1. Mục tiêu dự án
+## 1. Project Objectives
 
-Xây dựng một hệ thống trading bot cá nhân theo phong cách **Quant**, ưu tiên tuyệt đối cho:
+Build a personal trading bot system following a **Quant** approach, with absolute priority on:
 
-1. **Quản trị rủi ro và độ bền hệ thống**, không phải tối đa hóa lợi nhuận ngắn hạn.
-2. **Kiến trúc phân lớp rõ ràng** (Observer → Strategy → Risk → Execution).
-3. **Dễ backtest + dễ kiểm thử**, có thể mở rộng lên nhiều thị trường sau này.
+1. **Risk management and system robustness**, not short-term profit maximization.
+2. **Clear layered architecture** (Observer → Strategy → Risk → Execution).
+3. **Easy to backtest + easy to test**, scalable to multiple markets later.
 
-### Thị trường mục tiêu (giai đoạn 1–2)
+### Target Markets (Phase 1–2)
 
-- **Giai đoạn 1:** Micro E-mini S&P 500 futures (**MES**).
-- **Giai đoạn 2:** Micro Gold futures (**MGC**).
+- **Phase 1:** Micro E-mini S&P 500 futures (**MES**).
+- **Phase 2:** Micro Gold futures (**MGC**).
 
-Lý do chọn micro futures:
-- Volatility đủ cao để tạo nhiều tín hiệu.
-- Margin nhỏ (MES từ $50–300 intraday; MGC ~ $1,100).
-- Không có funding rate như crypto.
-- Chi phí và slippage dễ mô hình hóa.
-
----
-
-## 2. Giả định & ràng buộc ban đầu
-
-- Vốn test: **$1,000–2,000**.
-- Chỉ trade **1 contract** MES trong giai đoạn đầu (sau này scale theo logic).
-- **Không sử dụng đòn bẩy "ảo" thêm** ngoài leverage inherent của futures.
-- Tập trung vào **intraday trading**: tất cả vị thế đóng trước khi kết thúc phiên (tránh overnight margin jump).
-- Ngôn ngữ: **Go** (primary), kiến trúc và logic phải giữ nguyên nếu port sang ngôn ngữ khác.
+Why micro futures:
+- Sufficient volatility to generate many signals.
+- Low margin requirements (MES from $50–300 intraday; MGC ~ $1,100).
+- No funding rate like crypto.
+- Costs and slippage are easy to model.
 
 ---
 
-## 3. Kiến trúc tổng thể
+## 2. Initial Assumptions & Constraints
 
-Kiến trúc phân lớp (layered architecture):
+- Test capital: **$1,000–2,000**.
+- Trade only **1 contract** MES initially (scale up later with logic).
+- **No additional "artificial" leverage** beyond futures' inherent leverage.
+- Focus on **intraday trading**: all positions closed before session end (avoid overnight margin jumps).
+- Language: **Go** (primary), architecture and logic must remain consistent if ported to other languages.
+
+---
+
+## 3. Overall Architecture
+
+Layered architecture:
 
 ```
 ┌─────────────┐
@@ -167,54 +167,54 @@ Kiến trúc phân lớp (layered architecture):
 
 ### 3.1. Observer (Data/Market Layer)
 
-- **Nhiệm vụ:** Lấy dữ liệu market (ticks hoặc 1m bars), tính indicator cơ bản (ATR/StdDev, moving average, v.v.).
-- **Output:** Stream `MarketEvent` chuẩn hóa cho các layer phía trên.
-- **Yêu cầu:**
-  - Có abstraction `MarketDataFeed` có thể plug: live feed, recorded feed (backtest).
-  - Không chứa logic decision trading.
-  - Chạy trong goroutine riêng, push event qua channel.
+- **Purpose:** Fetch market data (ticks or 1m bars), calculate basic indicators (ATR/StdDev, moving average, etc.).
+- **Output:** Standardized `MarketEvent` stream for upper layers.
+- **Requirements:**
+  - Pluggable `MarketDataFeed` abstraction: live feed, recorded feed (backtest).
+  - No trading decision logic.
+  - Runs in separate goroutine, pushes events via channel.
 
 ### 3.2. Strategy Layer
 
-- **Nhiệm vụ:** Nhận `MarketEvent` → sinh `Signal` (BUY, SELL, FLAT) + meta (strength, reason).
-- **Thời gian đầu:**
-  - Chỉ cần **1–2 chiến lược cực đơn giản** (vd: breakout/mean-reversion) để test framework.
-- **Yêu cầu:**
-  - Interface `Strategy` chuẩn: `OnMarketEvent(ctx, event) []Signal`.
-  - Không xử lý sizing, không xử lý exposure – chỉ nói "nên LONG/SHORT/EXIT".
+- **Purpose:** Receive `MarketEvent` → generate `Signal` (BUY, SELL, FLAT) + metadata (strength, reason).
+- **Initially:**
+  - Only need **1–2 extremely simple strategies** (e.g., breakout/mean-reversion) to test framework.
+- **Requirements:**
+  - Standard `Strategy` interface: `OnMarketEvent(ctx, event) []Signal`.
+  - No sizing, no exposure handling – only says "should LONG/SHORT/EXIT".
 
-### 3.3. Risk Engine (Core của dự án)
+### 3.3. Risk Engine (Project Core)
 
-- **Nhiệm vụ:** Biến `Signal` từ Strategy thành **`OrderIntent` đã được kiểm soát rủi ro**.
-- **Trách nhiệm chính:**
-  - Theo dõi **equity**, **high-water mark**.
-  - Tính **global drawdown** và kích hoạt **Kill Switch** khi vượt ngưỡng.
-  - Tính **position sizing** dựa trên risk-per-trade và volatility (ATR/StdDev).
-  - Kiểm soát **exposure** (per symbol, tổng danh mục).
-- Đây là **layer quan trọng nhất**, được triển khai và test trước tất cả.
-- **Single-threaded** để tránh race condition trên equity state.
+- **Purpose:** Transform `Signal` from Strategy into **risk-controlled `OrderIntent`**.
+- **Main responsibilities:**
+  - Track **equity**, **high-water mark**.
+  - Calculate **global drawdown** and activate **Kill Switch** when threshold exceeded.
+  - Calculate **position sizing** based on risk-per-trade and volatility (ATR/StdDev).
+  - Control **exposure** (per symbol, total portfolio).
+- This is the **most critical layer**, implemented and tested before everything else.
+- **Single-threaded** to avoid race conditions on equity state.
 
 ### 3.4. Execution Layer
 
-- **Nhiệm vụ:** Nhận `OrderIntent` → gửi lệnh thực tế tới broker hoặc simulate fill trong backtest.
-- **Có 2 mode:**
-  - `LiveExecution`: gọi API broker / trading platform.
-  - `SimulatedExecution`: dùng trong backtest.
-- **Yêu cầu:**
-  - Đảm bảo tất cả lệnh đều đi qua Risk Engine trước.
-  - Log đầy đủ (timestamp, price, slippage, trạng thái).
-  - Async với timeout, có retry policy.
-  - **Idempotent**: retry không tạo duplicate orders.
+- **Purpose:** Receive `OrderIntent` → send actual order to broker or simulate fill in backtest.
+- **Two modes:**
+  - `LiveExecution`: calls broker API / trading platform.
+  - `SimulatedExecution`: used in backtest.
+- **Requirements:**
+  - Ensure all orders go through Risk Engine first.
+  - Full logging (timestamp, price, slippage, status).
+  - Async with timeout, retry policy.
+  - **Idempotent**: retries don't create duplicate orders.
 
 ### 3.5. Persistence Layer
 
-- **Nhiệm vụ:** Lưu trữ state để recovery sau crash.
-- **Lưu trữ:**
-  - Equity snapshots (mỗi fill).
+- **Purpose:** Store state for post-crash recovery.
+- **Stores:**
+  - Equity snapshots (each fill).
   - Open positions.
   - Pending orders.
   - Trade history (audit trail).
-- **Storage options:** SQLite (đơn giản), PostgreSQL (production).
+- **Storage options:** SQLite (simple), PostgreSQL (production).
 
 ---
 
@@ -242,10 +242,10 @@ type Executor interface {
 }
 ```
 
-**Quy tắc:**
-- Không share mutable state giữa goroutines mà không có synchronization.
-- Dùng channel để communicate, không dùng shared memory.
-- Risk Engine state chỉ được modify từ một goroutine.
+**Rules:**
+- Don't share mutable state between goroutines without synchronization.
+- Use channels to communicate, not shared memory.
+- Risk Engine state can only be modified from one goroutine.
 
 ---
 
@@ -272,70 +272,70 @@ type Executor interface {
                    └──────────┘
 ```
 
-**Mỗi transition phải:**
-- Được log với timestamp
-- Trigger equity update nếu có fill
+**Each transition must:**
+- Be logged with timestamp
+- Trigger equity update if filled
 - Notify Risk Engine
-- **Persist to storage** (cho recovery)
+- **Persist to storage** (for recovery)
 
 ---
 
-## 6. Invariants (Luật bất biến của hệ thống)
+## 6. System Invariants
 
-Các bất biến sau **phải được giữ chặt** trong mọi thiết kế và code:
+The following invariants **must be strictly maintained** in all design and code:
 
-### 6.1. Không được vượt Max Global Drawdown
+### 6.1. Must Not Exceed Max Global Drawdown
 
-- **Định nghĩa:** Global Drawdown = (HighWaterMarkEquity - CurrentEquity) / HighWaterMarkEquity.
-- Nếu `GlobalDD >= MaxAllowedDD` (ví dụ 20%):
-  - Tự động:
-    - Đóng tất cả vị thế.
-    - Chuyển hệ thống sang **SAFE MODE** (không mở lệnh mới).
-    - Ghi log + **emit alert** (Telegram/Discord).
+- **Definition:** Global Drawdown = (HighWaterMarkEquity - CurrentEquity) / HighWaterMarkEquity.
+- If `GlobalDD >= MaxAllowedDD` (e.g., 20%):
+  - Automatically:
+    - Close all positions.
+    - Switch system to **SAFE MODE** (no new orders).
+    - Log + **emit alert** (Telegram/Discord).
 
-### 6.2. Mọi order phải đi qua Risk Engine
+### 6.2. All Orders Must Go Through Risk Engine
 
-- Strategy **không được** gọi Execution trực tiếp.
-- Bắt buộc: `Signal` → `RiskEngine.ValidateAndSize()` → `OrderIntent` → `Execution`.
+- Strategy **must not** call Execution directly.
+- Required flow: `Signal` → `RiskEngine.ValidateAndSize()` → `OrderIntent` → `Execution`.
 
-### 6.3. Position size phải được tính dựa trên risk-per-trade
+### 6.3. Position Size Must Be Calculated Based on Risk-Per-Trade
 
-- Không dùng position size "cố định" kiểu 1 contract cứng, trừ giai đoạn test sơ khai.
-- `PositionSize` phải đảm bảo: max loss nếu bị stop-out ≤ `risk_per_trade` (tỷ lệ phần trăm vốn).
+- Don't use "fixed" position size like hardcoded 1 contract, except in initial testing.
+- `PositionSize` must ensure: max loss if stopped out ≤ `risk_per_trade` (percentage of capital).
 
-### 6.4. Hệ thống phải fail-safe, không fail-open
+### 6.4. System Must Be Fail-Safe, Not Fail-Open
 
-- Nếu mất kết nối dữ liệu, API, hoặc dữ liệu đầu vào không hợp lệ, default hành vi: **dừng mở lệnh mới**, có thể đóng/giảm vị thế nếu cần, log rõ ràng.
+- If data connection lost, API down, or invalid input data, default behavior: **stop opening new orders**, may close/reduce positions if needed, log clearly.
 
-### 6.5. Graceful Shutdown bắt buộc
+### 6.5. Graceful Shutdown Required
 
-- Khi nhận SIGINT/SIGTERM:
-  - Dừng nhận signal mới từ Strategy.
-  - Đợi pending orders confirm hoặc timeout.
-  - Tùy config: đóng vị thế hoặc giữ nguyên.
-  - **Persist state** trước khi exit.
+- When receiving SIGINT/SIGTERM:
+  - Stop accepting new signals from Strategy.
+  - Wait for pending orders to confirm or timeout.
+  - Depending on config: close positions or keep them.
+  - **Persist state** before exit.
 
 ### 6.6. Order Idempotency
 
-- Mỗi order phải có **unique client_order_id**.
-- Retry với cùng client_order_id **không được** tạo duplicate.
-- Check trước khi submit: order đã tồn tại chưa?
+- Each order must have **unique client_order_id**.
+- Retry with same client_order_id **must not** create duplicates.
+- Check before submit: does order already exist?
 
 ### 6.7. Decimal Precision
 
-- **KHÔNG dùng float64** cho tiền và giá trong production.
-- Dùng **fixed-point arithmetic** hoặc `decimal` library.
-- Tất cả calculations phải reproducible.
+- **DO NOT use float64** for money and prices in production.
+- Use **fixed-point arithmetic** or `decimal` library.
+- All calculations must be reproducible.
 
 ---
 
-## 7. Thông số cấu hình (config)
+## 7. Configuration Parameters
 
 ```yaml
 account:
   starting_equity: 1000.0
   max_global_drawdown_pct: 0.20  # 20%
-  risk_per_trade_pct: 0.01       # 1% mỗi lệnh
+  risk_per_trade_pct: 0.01       # 1% per trade
 
 market:
   instrument_primary: "MES"
@@ -346,7 +346,7 @@ market:
   session_end: "16:00"           # Friday 4pm CT
   daily_break_start: "16:00"     # Daily maintenance
   daily_break_end: "17:00"
-  session_close_cutoff_min: 15   # Đóng lệnh trước close X phút
+  session_close_cutoff_min: 15   # Close orders X minutes before session close
 
 risk:
   volatility_lookback_bars: 20
@@ -363,7 +363,7 @@ execution:
 
 health:
   heartbeat_interval_sec: 5
-  max_missed_heartbeats: 3       # Sau 3 lần miss → SAFE MODE
+  max_missed_heartbeats: 3       # After 3 misses → SAFE MODE
   data_staleness_threshold_sec: 10
 
 shutdown:
@@ -404,7 +404,7 @@ backtest:
 
 ## 8. Alerting System
 
-### Events cần alert:
+### Events requiring alerts:
 
 | Event | Severity | Action |
 |-------|----------|--------|
@@ -454,12 +454,12 @@ GET /health/ready    → Readiness probe (có data feed chưa?)
 
 ## 10. State Persistence & Recovery
 
-### Dữ liệu cần persist:
+### Data to persist:
 
-1. **Equity snapshots** - mỗi fill, mỗi phút
+1. **Equity snapshots** - each fill, each minute
 2. **Open positions** - symbol, side, size, entry price, entry time
-3. **Pending orders** - để reconcile sau restart
-4. **High water mark** - để tính drawdown đúng
+3. **Pending orders** - for reconciliation after restart
+4. **High water mark** - for correct drawdown calculation
 5. **Trade history** - audit trail
 
 ### Recovery flow:
@@ -506,11 +506,11 @@ type RateLimiter interface {
 
 ---
 
-## 12. Roadmap kỹ thuật
+## 12. Technical Roadmap
 
 ### Phase 1 – Skeleton & Risk Engine
 
-#### 1. Cấu trúc thư mục (Go)
+#### 1. Directory Structure (Go)
 
 ```
 cmd/
@@ -531,14 +531,14 @@ pkg/
   ratelimit/            # Rate limiter utilities
 ```
 
-#### 2. Implement Risk Engine trước
+#### 2. Implement Risk Engine First
 
 - **HighWaterMarkTracker**
 - **CheckGlobalDrawdown**
 - **PositionSizer**
 - **RiskEngine.ValidateOrder(ctx, signal)**
 
-#### 3. Unit tests
+#### 3. Unit Tests
 
 - Drawdown logic
 - Position sizing
@@ -550,7 +550,7 @@ pkg/
 - ATR, moving average calculations
 - 1–2 simple strategies
 
-### Phase 3 – Execution & Backtest loop
+### Phase 3 – Execution & Backtest Loop
 
 - SimulatedExecution
 - Backtest runner
@@ -593,29 +593,29 @@ make mocks
 
 ---
 
-## 14. Yêu cầu về Style & Quality
+## 14. Style & Quality Requirements
 
-- Code phải:
-  - Rõ ràng, ưu tiên **tính dễ đọc** hơn "tricky optimization".
-  - Hạn chế side-effect không cần thiết.
-  - Log đầy đủ những event quan trọng.
-- **Unit test là bắt buộc** cho Risk Engine, Position Sizing, Drawdown logic.
-- **Không đưa Machine Learning** vào giai đoạn đầu.
-- **Không cố "tối ưu tham số backtest"** – focus vào **robustness**.
-- **CI phải pass** trước khi merge.
+- Code must:
+  - Be clear, prioritize **readability** over "tricky optimization".
+  - Minimize unnecessary side-effects.
+  - Log all important events thoroughly.
+- **Unit tests are mandatory** for Risk Engine, Position Sizing, Drawdown logic.
+- **No Machine Learning** in initial phase.
+- **Don't "optimize backtest parameters"** – focus on **robustness**.
+- **CI must pass** before merging.
 
 ---
 
-## 15. Mục tiêu thành công giai đoạn 1
+## 15. Phase 1 Success Criteria
 
-Backtest trên MES (dữ liệu vài tháng) với điều kiện:
+Backtest on MES (several months of data) with conditions:
 
 - **Max Drawdown** < 10–15%.
-- Lợi nhuận kỳ vọng dương sau chi phí (commission + slippage).
-- Không có bug kiểu "cháy tài khoản" do lỗi logic risk.
-- Risk Engine & Execution hoạt động đúng như spec (được chứng minh qua test).
-- Graceful shutdown hoạt động đúng.
-- State recovery hoạt động đúng.
-- Alerting hoạt động đúng.
+- Positive expected profit after costs (commission + slippage).
+- No "account blowup" bugs due to risk logic errors.
+- Risk Engine & Execution work correctly as specified (proven through tests).
+- Graceful shutdown works correctly.
+- State recovery works correctly.
+- Alerting works correctly.
 
-**Khi đạt được, mới nâng cấp sang MGC và/hoặc live trading.**
+**Only after achieving these, upgrade to MGC and/or live trading.**
